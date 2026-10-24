@@ -32,7 +32,7 @@
 | `AI_HOURLY_LIMIT` | var | per user, default 60 |
 | `AI_DAILY_COST_CAP_USD` | var | per user, default 1.00 |
 
-**GitHub Actions** (`.github/workflows/deploy.yml`): set the secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and `SUPABASE_DB_URL`, and the variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Every push to `main` runs the tests, applies migrations, deploys the Worker, and builds and deploys Pages.
+**GitHub Actions** (`.github/workflows/deploy.yml`): set the secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SUPABASE_DB_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`, and the variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. CI pushes the two Worker secrets and creates the Pages project if it is missing. Every push to `main` runs the tests, applies migrations, deploys the Worker, and builds and deploys Pages.
 
 ## First production deploy
 

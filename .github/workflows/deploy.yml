@@ -37,11 +37,17 @@ jobs:
         run: supabase db push --db-url "${{ secrets.SUPABASE_DB_URL }}"
       - name: Deploy API worker
         working-directory: worker
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           npm ci
           npx wrangler deploy \
             --var SUPABASE_URL:${{ vars.SUPABASE_URL }} \
             --var SUPABASE_ANON_KEY:${{ vars.SUPABASE_ANON_KEY }}
+          # Worker secrets come from GitHub secrets, so every credential lives in one place.
+          echo "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY
+          echo "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
       - name: Build & deploy web app to Cloudflare Pages
         working-directory: app
         env:
@@ -50,4 +56,5 @@ jobs:
         run: |
           npm ci
           npm run build:web
+          npx wrangler pages project create momentum --production-branch main 2>/dev/null || true
           npx wrangler pages deploy dist --project-name momentum --branch main
