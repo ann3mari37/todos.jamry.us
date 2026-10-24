@@ -1,0 +1,75 @@
+# Operations
+
+## Environments
+
+| | Development | Production |
+|---|---|---|
+| Supabase | separate project (e.g. `momentum-dev`) | `momentum` project |
+| Worker | `wrangler deploy --env dev` → `momentum-api-dev.<account>.workers.dev` | `wrangler deploy` → `todos.jamry.us/api/*` |
+| Web | `npx expo start --web` (localhost:8081) | Cloudflare Pages project `momentum`, custom domain `todos.jamry.us` |
+| Cron | off | daily 13:17 UTC |
+
+## Environment variables
+
+**App** (`app/.env`, public; RLS makes them safe to ship)
+
+| Name | Example |
+|---|---|
+| `EXPO_PUBLIC_SUPABASE_URL` | `https://abcd.supabase.co` |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | anon / publishable key |
+| `EXPO_PUBLIC_API_URL` | optional. Web defaults to same-origin `/api`; native defaults to `https://todos.jamry.us` |
+
+**Worker** (`worker/wrangler.toml` vars + secrets)
+
+| Name | Kind | Notes |
+|---|---|---|
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | var | |
+| `SUPABASE_SERVICE_ROLE_KEY` | **secret** | `wrangler secret put SUPABASE_SERVICE_ROLE_KEY` |
+| `OPENAI_API_KEY` | **secret** | `wrangler secret put OPENAI_API_KEY` |
+| `OPENAI_MODEL` | var | default `gpt-5-mini` |
+| `OPENAI_TRANSCRIBE_MODEL` | var | default `gpt-4o-mini-transcribe` |
+| `ALLOWED_ORIGINS` | var | `https://todos.jamry.us` |
+| `AI_HOURLY_LIMIT` | var | per user, default 60 |
+| `AI_DAILY_COST_CAP_USD` | var | per user, default 1.00 |
+
+**GitHub Actions** (`.github/workflows/deploy.yml`): set the secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and `SUPABASE_DB_URL`, and the variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Every push to `main` runs the tests, applies migrations, deploys the Worker, and builds and deploys Pages.
+
+## First production deploy
+
+1. **Supabase:** create the project. Under Auth → URL Configuration set the Site URL to `https://todos.jamry.us`. Run `supabase db push`.
+2. **Cloudflare Pages:** create the project `momentum` (Direct Upload). Under Custom domains, add `todos.jamry.us`.
+3. **Worker:** in `worker/`, run `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`, then `wrangler secret put OPENAI_API_KEY`, then `wrangler deploy`. The route `todos.jamry.us/api/*` takes precedence over Pages for API paths.
+4. **Web:** in `app/`, run `npm run build:web && npx wrangler pages deploy dist --project-name momentum`.
+5. **Check:** `curl https://todos.jamry.us/api/health` → `{"ok":true,"ai":true,...}`.
+6. **iOS:** `npx eas build -p ios --profile production`, then `eas submit`.
+
+## Monitoring and costs
+
+- **AI usage:** `select operation, count(*), sum(cost_usd) from ai_operations where created_at > now() - interval '30 days' group by 1;`. Settings → AI Preferences shows a 30-day total.
+- **Worker logs:** Cloudflare dashboard → Workers → momentum-api → Logs (observability is enabled). Logs carry error codes only.
+- **Estimated monthly cost for one person:**
+  - Supabase Free tier: $0, or Pro at $25 if you want daily backups and no pausing.
+  - Cloudflare Workers Free and Pages: $0.
+  - OpenAI with `gpt-5-mini`: about $0.001–0.003 per capture or decomposition. At around 20 AI calls a day that is roughly **$1–2 a month**. Transcription is about $0.003 per minute.
+  - The per-user daily cap (default $1) is a hard ceiling.
+
+## Backup and recovery
+
+- Supabase Pro includes daily backups, plus point-in-time recovery as an add-on. On the Free tier, schedule `supabase db dump -f backup.sql --data-only` (for example in a GitHub Action) and store it privately.
+- **User-level export:** Settings → Privacy & Data → Export downloads all data as JSON (`export_my_data()`).
+- **Restore:** create a new project, run `supabase db push`, then `psql "$DB_URL" -f backup.sql`.
+
+## Verification done
+
+- 13 core unit tests and 8 Worker tests, all passing. App and Worker typecheck clean.
+- Migrations applied to Postgres 16 with an `auth` schema stub. Checks covered: RLS isolation between two users, `complete_action` idempotency, retroactive `occurred_at`, history surviving archiving, and `commit_capture` replay producing no duplicates.
+- Web build exported and rendered in headless Chromium against mocked data: all screens, plus the AI-unavailable capture fallback.
+
+## Known limitations / next steps
+
+- Not yet tested against a live Supabase project, a live OpenAI key, or a physical iOS device.
+- Push notifications: preferences are stored and check-ins appear in the app. Device push (Expo Notifications, plus a sender in the cron) is Phase 2.
+- Photo and file attachments are stubbed in the UI (a future phase in the scope).
+- Personalization records feedback and applies it to rest suggestions and lower scores. Richer learned preferences are Phase 2.
+- Dates are typed as `YYYY-MM-DD`. A native date picker would be a nice upgrade.
+- Light theme only.

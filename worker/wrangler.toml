@@ -1,0 +1,38 @@
+# Momentum API — Cloudflare Worker
+name = "momentum-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Served on the same domain as the web app, so the browser needs no cross-origin calls.
+routes = [{ pattern = "todos.jamry.us/api/*", zone_name = "jamry.us" }]
+
+[triggers]
+crons = ["17 13 * * *"] # daily, 13:17 UTC
+
+[vars]
+ENVIRONMENT = "production"
+OPENAI_MODEL = "gpt-5-mini"
+OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
+ALLOWED_ORIGINS = "https://todos.jamry.us"
+AI_HOURLY_LIMIT = "60"
+AI_DAILY_COST_CAP_USD = "1.00"
+# SUPABASE_URL and SUPABASE_ANON_KEY are vars; set them here or in the dashboard.
+# Secrets (never commit):  wrangler secret put SUPABASE_SERVICE_ROLE_KEY / OPENAI_API_KEY
+
+[observability]
+enabled = true
+
+[env.dev]
+name = "momentum-api-dev"
+routes = []
+workers_dev = true
+[env.dev.triggers]
+crons = []
+[env.dev.vars]
+ENVIRONMENT = "dev"
+OPENAI_MODEL = "gpt-5-mini"
+OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
+ALLOWED_ORIGINS = "http://localhost:8081"
+AI_HOURLY_LIMIT = "60"
+AI_DAILY_COST_CAP_USD = "0.50"

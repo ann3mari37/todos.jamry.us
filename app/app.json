@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Momentum",
+    "slug": "momentum",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "us.jamry.momentum",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Momentum uses the microphone so you can capture goals and accomplishments by voice."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FBF3EF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "us.jamry.momentum"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single",
+      "name": "Momentum",
+      "shortName": "Momentum",
+      "themeColor": "#EE6B85",
+      "backgroundColor": "#FBF3EF",
+      "description": "Small steps. Big change."
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Momentum uses the microphone so you can capture goals and accomplishments by voice."
+        }
+      ],
+      "expo-sharing"
+    ],
+    "scheme": "momentum",
+    "backgroundColor": "#FBF3EF",
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

@@ -1,0 +1,53 @@
+name: Test & deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: app
+      - run: npm ci
+        working-directory: worker
+      - run: npx tsc --noEmit && npx vitest run
+        working-directory: app
+      - run: npx tsc --noEmit && npx vitest run
+        working-directory: worker
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: supabase/setup-cli@v1
+      - name: Apply database migrations
+        run: supabase db push --db-url "${{ secrets.SUPABASE_DB_URL }}"
+      - name: Deploy API worker
+        working-directory: worker
+        run: |
+          npm ci
+          npx wrangler deploy \
+            --var SUPABASE_URL:${{ vars.SUPABASE_URL }} \
+            --var SUPABASE_ANON_KEY:${{ vars.SUPABASE_ANON_KEY }}
+      - name: Build & deploy web app to Cloudflare Pages
+        working-directory: app
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: |
+          npm ci
+          npm run build:web
+          npx wrangler pages deploy dist --project-name momentum --branch main
