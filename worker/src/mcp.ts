@@ -388,7 +388,7 @@ const EmailActionInput = z.object({ message_ids: z.array(z.string().uuid()).min(
 
 async function inbox(ctx: Ctx, input: z.infer<typeof InboxInput>) {
   const [accounts, msgs, projects] = await Promise.all([
-    must(ctx.db.from('email_accounts').select('id,provider,email_address,display_name,status')),
+    must(ctx.db.from('email_accounts').select('id,provider,email_address,display_name,status,webmail_url')),
     must(ctx.db.from('email_messages').select('id,account_id,provider_message_id,thread_id,from_name,from_address,subject,snippet,summary,received_at,is_unread,is_archived,category,importance,status,web_link,message_id_header')
       .eq('is_archived', false).gte('received_at', new Date(Date.now() - input.days * 86_400_000).toISOString()).order('received_at', { ascending: false }).limit(80)),
     must(ctx.db.from('goals').select('id,title').in('status', ['active', 'waiting', 'blocked'])),

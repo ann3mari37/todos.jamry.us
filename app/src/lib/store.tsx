@@ -38,7 +38,7 @@ export interface DayCheckin {
 /** An AI app the user allowed to reach Momentum (Supabase OAuth grant). */
 export interface ChatConnection { client_id: string; name: string; uri: string | null; granted_at: string }
 export interface EmailAccount {
-  id: string; provider: 'gmail' | 'outlook' | 'imap'; email_address: string; display_name: string | null; color: string;
+  id: string; provider: 'gmail' | 'outlook' | 'imap'; email_address: string; display_name: string | null; color: string; webmail_url?: string | null;
   life_area_id: string | null; digest_enabled: boolean; status: 'active' | 'needs_reauth' | 'error'; error_code: string | null; last_synced_at: string | null;
 }
 export interface EmailMessage {
@@ -270,9 +270,18 @@ function useStoreValue() {
   useEffect(() => {
     if (!session) { setLoading(false); return; }
     refresh();
-    const t = setInterval(() => flush(), 30_000);
+    // Stay in step with the person's other devices: reload every 30 s while the app is on screen, and right away when
+    // they come back to it (tab focus on the web, foreground on phones).
+    const visible = () => Platform.OS !== 'web' || typeof document === 'undefined' || document.visibilityState === 'visible';
+    const t = setInterval(() => { if (visible()) refresh(); else flush(); }, 30_000);
     const sub = AppState.addEventListener('change', (s) => s === 'active' && refresh());
-    return () => { clearInterval(t); sub.remove(); };
+    const onFocus = () => refresh();
+    if (Platform.OS === 'web' && typeof window !== 'undefined') window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(t);
+      sub.remove();
+      if (Platform.OS === 'web' && typeof window !== 'undefined') window.removeEventListener('focus', onFocus);
+    };
   }, [session, refresh, flush]);
 
   // ── Mutations

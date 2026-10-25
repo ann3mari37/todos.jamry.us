@@ -3,7 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { InboxBriefing } from '../../src/components/EmailBits';
+import { InboxTaskCard } from '../../src/components/EmailBits';
 import { Flower } from '../../src/components/Flower';
 import { FlowerArt } from '../../src/components/FlowerArt';
 import { EditTask } from '../../src/components/EditTask';
@@ -181,14 +181,8 @@ export default function Today() {
             </Card>
           )}
 
-          {store.emailAccounts.length > 0 && (
-            <>
-              <InboxBriefing compact onOpen={() => router.push('/inbox')} />
-              <Pressable onPress={() => router.push('/inbox')} accessibilityRole="button" style={{ alignSelf: 'flex-end', paddingVertical: 8 }}>
-                <Muted style={{ color: colors.pinkDeep, fontFamily: fonts.medium }}>{inboxAction > 0 ? `${inboxAction} email${inboxAction === 1 ? '' : 's'} need you · ` : ''}Open inbox ›</Muted>
-              </Pressable>
-            </>
-          )}
+          {/* The inbox shows up as one task ("Answer 2 emails"); the briefing itself lives in the Inbox. */}
+          {store.emailAccounts.length > 0 && <InboxTaskCard onPress={() => router.push('/inbox')} />}
 
           {loose.length >= 3 && (
             <Pressable onPress={() => setOrganizing(true)} accessibilityRole="button" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.pinkWash, marginBottom: 12, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>

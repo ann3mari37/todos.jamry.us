@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, Text, View } from 'react-native';
 import type { EmailCategory } from '../core/ai-contracts';
 import { friendlyDate, timeOfDay, toISODate } from '../core/dates';
-import { doFirst, emailLink, rulesBriefing } from '../core/emailBrief';
+import { doFirst, emailLink, oneLine, rulesBriefing } from '../core/emailBrief';
 import { useStore, type EmailDigest, type EmailMessage } from '../lib/store';
 import { colors, fonts, radius, shadow } from '../theme';
 import { Body, Icon, Muted, type IconName } from './ui';
@@ -56,10 +56,12 @@ export function useEmailAvailable(): boolean | null {
   return store.emailAccounts.length > 0 ? true : ok;
 }
 
-/** Opens an email in its own mail app (Gmail, Outlook, Apple Mail, or the provider's webmail). */
+const APPLE = Platform.OS === 'ios' || (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? ''));
+
+/** Opens an email in its own mail app (Gmail, Outlook, the inbox's webmail, or Apple Mail on Apple devices). */
 export function OpenInMail({ m, small }: { m: EmailMessage; small?: boolean }) {
   const store = useStore();
-  const link = emailLink(m, store.emailAccounts.find((a) => a.id === m.account_id));
+  const link = emailLink(m, store.emailAccounts.find((a) => a.id === m.account_id), APPLE);
   if (!link) return null;
   return (
     <Pressable onPress={() => Linking.openURL(link.url).catch(() => {})} accessibilityRole="link" accessibilityLabel={`${link.label}: ${m.subject ?? ''}`} hitSlop={8}
@@ -70,61 +72,74 @@ export function OpenInMail({ m, small }: { m: EmailMessage; small?: boolean }) {
   );
 }
 
+export interface BriefItem { m: EmailMessage; why: string }
+
 /**
- * The inbox briefing: one cohesive paragraph and the emails to do first, each with why and a link to open it.
- * Uses today's briefing from the person's AI chat (or Momentum's AI) when there is one, and flags mail that arrived
- * after it; otherwise Momentum's rules write it live from the synced mail.
+ * One briefing for the whole app, so the Inbox summary, its "Do first" tab and Today's inbox card always agree.
+ * Today's briefing from the person's AI chat (or Momentum's AI) wins when there is one, with anything that arrived
+ * after it flagged; otherwise Momentum's rules write it live from the synced mail.
  */
-export function InboxBriefing({ compact, onOpen }: { compact?: boolean; onOpen?: (messageId: string) => void }) {
+export function useInboxBriefing() {
   const store = useStore();
   const today = toISODate(new Date());
-  const recent = useMemo(() => store.emailMessages.filter((m) => Date.now() - new Date(m.received_at).getTime() < 2 * 86_400_000), [store.emailMessages]);
-  const projects = store.goals.filter((g) => ['active', 'waiting', 'blocked'].includes(g.status));
-  const saved = store.emailDigest && store.emailDigest.digest_date === today && store.emailDigest.source && store.emailDigest.source !== 'rules' ? store.emailDigest : null;
-  const live = useMemo(() => rulesBriefing(recent, projects), [recent, projects.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const since = saved?.updated_at ?? saved?.created_at;
-  const newer = saved && since ? doFirst(recent.filter((m) => m.received_at > since), projects) : [];
-  const summary = saved?.summary ?? live.summary;
-  const list = (saved?.do_first?.length ? saved.do_first : saved ? saved.highlights.map((h) => ({ message_id: h.message_id, why: h.text })) : live.do_first)
-    .filter((d) => store.emailMessages.some((m) => m.id === d.message_id && !m.is_archived && m.status !== 'dismissed'));
+  const recent = useMemo(() => store.emailMessages.filter((m) => Date.now() - new Date(m.received_at).getTime() < 3 * 86_400_000), [store.emailMessages]);
+  const projects = useMemo(() => store.goals.filter((g) => ['active', 'waiting', 'blocked'].includes(g.status)), [store.goals]);
+  const live = useMemo(() => rulesBriefing(recent, projects), [recent, projects]);
+  const d = store.emailDigest;
+  const saved = d && d.digest_date === today && d.source && d.source !== 'rules' ? d : null;
+  const since = saved?.updated_at ?? saved?.created_at ?? null;
+  const open = (id: string) => store.emailMessages.find((x) => x.id === id && !x.is_archived && x.status !== 'dismissed' && x.status !== 'tasks_created');
+  const resolve = (xs: { message_id: string; why: string }[]): BriefItem[] => xs.map((x) => ({ m: open(x.message_id)!, why: x.why })).filter((x) => x.m);
+  const savedList = saved ? (saved.do_first?.length ? saved.do_first : saved.highlights.map((h) => ({ message_id: h.message_id, why: h.text }))) : null;
+  const list = resolve(savedList ?? live.do_first);
+  const newer = saved && since ? resolve(doFirst(recent.filter((m) => m.received_at > since), projects)).filter((x) => !list.some((l) => l.m.id === x.m.id)) : [];
   const who = saved?.source === 'chat' ? `From ${saved.author && !/^[0-9a-f-]{20,}$/i.test(saved.author) ? saved.author : 'your AI chat'}` : saved?.source === 'ai' ? 'From Momentum’s AI' : 'Momentum’s rules';
-  const when = saved && since ? timeOfDay(since) : 'live';
-  const row = (d: { message_id: string; why: string }, i: number, isNew = false) => {
-    const m = store.emailMessages.find((x) => x.id === d.message_id)!;
-    return (
-      <View key={`${isNew ? 'n' : 'd'}-${d.message_id}`} style={{ flexDirection: 'row', gap: 10, paddingVertical: 7 }}>
-        <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: isNew ? colors.amberSoft : colors.pinkWash, alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 11, color: isNew ? '#B7862A' : colors.pinkDeep }}>{isNew ? 'new' : i + 1}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Pressable onPress={() => onOpen?.(m.id)} accessibilityRole="button" accessibilityLabel={`${m.from_name ?? m.from_address}: ${m.subject ?? ''}`}>
-            <Body numberOfLines={1} style={{ fontFamily: fonts.medium, fontSize: 14 }}>{m.from_name || m.from_address} · {m.subject || '(no subject)'}</Body>
-            <Muted numberOfLines={2}>{d.why}</Muted>
-          </Pressable>
-          <OpenInMail m={m} small />
-        </View>
-      </View>
-    );
-  };
+  return { summary: saved?.summary ?? live.summary, list: [...list, ...newer], newer: newer.length, saved: !!saved, who, when: since ? timeOfDay(since) : 'live' };
+}
+
+/** The Inbox summary: one short paragraph. The emails themselves are in the "Do first" tab below it. */
+export function InboxBriefing() {
+  const b = useInboxBriefing();
   return (
     <View style={[{ backgroundColor: colors.card, borderRadius: radius.lg, padding: 16, borderWidth: 1, borderColor: colors.border, marginTop: 8 }, shadow]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Icon name={saved?.source === 'chat' ? 'message-circle' : 'sun'} size={16} color={colors.pink} />
+        <Icon name={b.who.startsWith('From your') || b.who.startsWith('From ') ? 'message-circle' : 'sun'} size={16} color={colors.pink} />
         <Text style={{ fontFamily: fonts.semibold, color: colors.pinkDeep, fontSize: 13 }}>Inbox briefing</Text>
-        <Muted style={{ marginLeft: 'auto', fontSize: 12 }}>{who} · {when}</Muted>
+        <Muted style={{ marginLeft: 'auto', fontSize: 12 }}>{b.who} · {b.when}</Muted>
       </View>
-      <Body style={{ marginTop: 8, lineHeight: 22 }} numberOfLines={compact ? 4 : undefined}>{summary}</Body>
-      {list.length > 0 && <Text style={{ fontFamily: fonts.semibold, fontSize: 12, letterSpacing: 0.5, color: colors.textMuted, marginTop: 12 }}>DO FIRST</Text>}
-      {list.slice(0, compact ? 3 : 10).map((d, i) => row(d, i))}
-      {newer.length > 0 && (
-        <>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, letterSpacing: 0.5, color: '#B7862A', marginTop: 10 }}>ARRIVED SINCE</Text>
-          {newer.slice(0, compact ? 2 : 5).map((d, i) => row(d, i, true))}
-        </>
-      )}
-      {!compact && !saved && (
-        <Muted style={{ marginTop: 10, fontSize: 12 }}>Want a smarter read? Ask your AI chat: “Check my Momentum inbox and tell me what to answer first.” Its briefing will show here.</Muted>
-      )}
+      <Body style={{ marginTop: 8, lineHeight: 22 }}>{b.summary}</Body>
+      {b.newer > 0 && <Muted style={{ marginTop: 6, color: '#B7862A' }}>{b.newer} more arrived since this briefing.</Muted>}
+      {!b.saved && <Muted style={{ marginTop: 10, fontSize: 12 }}>Want a smarter read? Ask your AI chat: “Check my Momentum inbox and tell me what to answer first.” Its briefing will show here.</Muted>}
     </View>
+  );
+}
+
+/** Today: the inbox as one task ("Answer 2 emails"), not a block of text. Hidden when nothing needs you. */
+export function InboxTaskCard({ onPress }: { onPress: () => void }) {
+  const b = useInboxBriefing();
+  if (!b.list.length) return null;
+  const n = b.list.length;
+  const first = b.list[0];
+  const minutes = Math.min(60, n * 5);
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Inbox: answer ${n} email${n === 1 ? '' : 's'}`}
+      style={({ pressed }) => [{ backgroundColor: colors.card, borderRadius: radius.lg, padding: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 12 }, shadow, pressed && { opacity: 0.8 }]}>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.pinkWash, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="mail" size={20} color={colors.pink} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.pinkDeep }}>Inbox</Text>
+          <Body style={{ fontFamily: fonts.medium, fontSize: 17, marginTop: 2 }}>Answer {n} email{n === 1 ? '' : 's'}</Body>
+          <Muted style={{ marginTop: 4 }} numberOfLines={2}>Start with {oneLine(first.m)}</Muted>
+        </View>
+        <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          <Icon name="chevron-right" size={18} color={colors.textFaint} />
+          <View style={{ backgroundColor: colors.tealSoft, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
+            <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.teal }}>~{minutes} min</Text>
+          </View>
+        </View>
+      </View>
+    </Pressable>
   );
 }

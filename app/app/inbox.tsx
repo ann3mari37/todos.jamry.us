@@ -7,16 +7,18 @@ import type { CommitItem, EmailStep } from '../src/core/ai-contracts';
 import { friendlyDate, startOfDay, timeOfDay } from '../src/core/dates';
 import { friendlyAiError } from '../src/lib/api';
 import { useStore, uuid, type EmailMessage } from '../src/lib/store';
-import { CATEGORY_META, InboxBriefing, OpenInMail } from '../src/components/EmailBits';
+import { CATEGORY_META, InboxBriefing, OpenInMail, useInboxBriefing } from '../src/components/EmailBits';
+import { isAutomated, notificationGroups, senderLabel, type NotificationGroup } from '../src/core/emailBrief';
 import { colors, fonts, radius } from '../src/theme';
 
-type Tab = 'action' | 'waiting' | 'all';
+type Tab = 'first' | 'waiting' | 'rest';
 
 const when = (iso: string) => (new Date(iso).getTime() >= startOfDay().getTime() ? timeOfDay(iso) : friendlyDate(iso.slice(0, 10)));
 
 export default function Inbox() {
   const store = useStore();
-  const [tab, setTab] = useState<Tab>('action');
+  const [tab, setTab] = useState<Tab>('first');
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [account, setAccount] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -40,9 +42,15 @@ export default function Inbox() {
   useEffect(() => { sync(false); }, [store.emailAccounts.length]);
 
   const msgs = useMemo(() => store.emailMessages.filter((m) => !account || m.account_id === account), [store.emailMessages, account]);
-  const action = msgs.filter((m) => m.category === 'action_needed' && m.status !== 'dismissed' && m.status !== 'tasks_created');
-  const waiting = msgs.filter((m) => m.category === 'waiting_on' && m.status !== 'dismissed');
-  const list = tab === 'action' ? action : tab === 'waiting' ? waiting : msgs;
+  // One source for "what needs me": the same briefing the summary and Today's inbox card use.
+  const briefing = useInboxBriefing();
+  const first = briefing.list.filter((x) => !account || x.m.account_id === account);
+  const firstIds = new Set(first.map((x) => x.m.id));
+  const live = msgs.filter((m) => m.status !== 'dismissed' && !m.is_archived);
+  const waiting = live.filter((m) => m.category === 'waiting_on' && !firstIds.has(m.id));
+  const rest = live.filter((m) => !firstIds.has(m.id) && m.category !== 'waiting_on');
+  const people = rest.filter((m) => !isAutomated(m));
+  const groups: NotificationGroup[] = notificationGroups(rest);
   const acct = (id: string) => store.emailAccounts.find((a) => a.id === id);
 
   return (
@@ -80,24 +88,50 @@ export default function Inbox() {
               )}
               {note && <Banner tone="soft" text={note} />}
 
-              <InboxBriefing onOpen={(id) => { const m = store.emailMessages.find((x) => x.id === id); if (m) setOpen(m); }} />
+              <InboxBriefing />
 
               <Segmented
                 value={tab}
                 onChange={setTab}
                 style={{ marginVertical: 14 }}
                 options={[
-                  { value: 'action', label: `Needs action${action.length ? ` · ${action.length}` : ''}` },
+                  { value: 'first', label: `Do first${first.length ? ` · ${first.length}` : ''}` },
                   { value: 'waiting', label: `Waiting${waiting.length ? ` · ${waiting.length}` : ''}` },
-                  { value: 'all', label: 'All' },
+                  { value: 'rest', label: 'Everything else' },
                 ]}
               />
 
-              {list.map((m) => <MessageRow key={m.id} m={m} color={acct(m.account_id)?.color ?? colors.teal} onPress={() => setOpen(m)} />)}
-              {list.length === 0 && (
+              {tab === 'first' && first.map((x, i) => <MessageRow key={x.m.id} m={x.m} rank={i + 1} why={x.why} color={acct(x.m.account_id)?.color ?? colors.teal} onPress={() => setOpen(x.m)} />)}
+              {tab === 'waiting' && waiting.map((m) => <MessageRow key={m.id} m={m} color={acct(m.account_id)?.color ?? colors.teal} onPress={() => setOpen(m)} />)}
+              {tab === 'rest' && (
+                <>
+                  {people.map((m) => <MessageRow key={m.id} m={m} color={acct(m.account_id)?.color ?? colors.teal} onPress={() => setOpen(m)} />)}
+                  {groups.map((g) => (
+                    <View key={g.sender}>
+                      <Card onPress={() => setExpanded(expanded === g.sender ? null : g.sender)} accessibilityLabel={`${g.count} from ${g.sender}`} style={{ paddingVertical: 14 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.track, alignItems: 'center', justifyContent: 'center' }}>
+                            <Icon name="bell" size={18} color={colors.textMuted} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Body style={{ fontFamily: g.unread ? fonts.semibold : fonts.medium }}>{g.sender} · {g.count} notification{g.count === 1 ? '' : 's'}</Body>
+                            <Muted numberOfLines={1}>{g.count > 1 && g.topic ? `Mostly “${g.topic}”` : g.latest.subject} · {when(g.latest.received_at)}</Muted>
+                          </View>
+                          <Icon name={expanded === g.sender ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textFaint} />
+                        </View>
+                      </Card>
+                      {expanded === g.sender && g.ids.map((id) => {
+                        const m = live.find((x) => x.id === id);
+                        return m ? <MessageRow key={id} m={m} compact color={acct(m.account_id)?.color ?? colors.teal} onPress={() => setOpen(m)} /> : null;
+                      })}
+                    </View>
+                  ))}
+                </>
+              )}
+              {((tab === 'first' && !first.length) || (tab === 'waiting' && !waiting.length) || (tab === 'rest' && !people.length && !groups.length)) && (
                 <Card style={{ alignItems: 'center', paddingVertical: 22 }}>
                   <Icon name="sun" size={22} color={colors.amber} />
-                  <Body style={{ fontFamily: fonts.medium, marginTop: 8 }}>{tab === 'action' ? 'Nothing needs you right now.' : tab === 'waiting' ? "You're not waiting on anyone." : 'No mail from the last week.'}</Body>
+                  <Body style={{ fontFamily: fonts.medium, marginTop: 8 }}>{tab === 'first' ? 'Nothing needs you first. Nice.' : tab === 'waiting' ? "You're not waiting on anyone." : 'No other mail from the last week.'}</Body>
                 </Card>
               )}
             </>
@@ -109,11 +143,11 @@ export default function Inbox() {
   );
 }
 
-function MessageRow({ m, color, onPress }: { m: EmailMessage; color: string; onPress: () => void }) {
+function MessageRow({ m, color, onPress, rank, why, compact }: { m: EmailMessage; color: string; onPress: () => void; rank?: number; why?: string; compact?: boolean }) {
   const store = useStore();
   const meta = CATEGORY_META[m.category ?? 'other'];
   const area = store.lifeAreas.find((a) => a.id === m.life_area_id);
-  const name = m.from_name || m.from_address || 'Unknown sender';
+  const name = isAutomated(m) ? senderLabel(m) : m.from_name || m.from_address || 'Unknown sender';
   return (
     <Card onPress={onPress} accessibilityLabel={`${m.is_unread ? 'Unread. ' : ''}${name}: ${m.subject ?? ''}`} style={{ paddingVertical: 14 }}>
       <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -128,7 +162,8 @@ function MessageRow({ m, color, onPress }: { m: EmailMessage; color: string; onP
             <Muted style={{ fontSize: 12 }}>{when(m.received_at)}</Muted>
           </View>
           <Body numberOfLines={1} style={{ fontFamily: fonts.medium, fontSize: 15, marginTop: 2 }}>{m.subject || '(no subject)'}</Body>
-          <Muted numberOfLines={2} style={{ marginTop: 3 }}>{m.summary ?? m.snippet ?? ''}</Muted>
+          {why ? <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.pinkDeep, marginTop: 3 }}>{rank ? `${rank}. ` : ''}{why}</Text> : null}
+          {!compact && <Muted numberOfLines={2} style={{ marginTop: 3 }}>{isAutomated(m) ? '' : m.summary ?? m.snippet ?? ''}</Muted>}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' }}>
             {m.category && (
               <View style={{ backgroundColor: meta.soft, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 }}>

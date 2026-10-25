@@ -105,6 +105,9 @@ const MESSAGES: EmailMessage[] = [
   mail('e6', 'm-gmail', 'The Weekly Bloom', 'Five spring bulbs to plant now', 11, 'newsletter', 1, 'Gardening newsletter with fall planting tips.', 'a-home'),
   mail('e7', 'm-work', 'Priya Natarajan', 'Team offsite agenda', 15, 'fyi', 2, 'Draft agenda for next week’s offsite; no reply needed unless you want changes.', 'a-work'),
   mail('e8', 'm-gmail', 'Bloom & Co', '30% off planters this weekend', 20, 'promotion', 1, 'Weekend sale on planters and pots.', null),
+  // CI notifications: grouped under "GitHub", never in Do first.
+  ...[1, 2, 3, 4].map((i) => mail(`e-ci${i}`, 'm-work', 'you', `[you/website] Run failed: Test & deploy - main (${i}c0ffee${i})`, 1 + i, 'fyi', 2,
+    'Test & deploy workflow run Repository: you/website Workflow: Test & deploy Duration: 41.0 seconds', 'a-work', [], { from_address: 'notifications@github.com', summary: null })),
 ];
 
 // A plan Claude sent through the connector, waiting on Today for review. ?fresh=1 in the URL starts as a brand-new user.

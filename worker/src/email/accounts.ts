@@ -8,6 +8,7 @@ import { GmailProvider } from './gmail';
 import { ImapProvider } from './imap';
 import { OutlookProvider } from './outlook';
 import { ProviderError, type MailProvider, type ProviderKind } from './types';
+import { webmailForImapHost } from '../../../app/src/core/emailBrief';
 
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
@@ -79,13 +80,13 @@ async function mailboxAddress(p: 'gmail' | 'outlook', token: string): Promise<{ 
   return { address: (j.mail ?? j.userPrincipalName).toLowerCase(), name: j.displayName };
 }
 
-async function saveAccount(env: Env, userId: string, row: { provider: ProviderKind; email_address: string; display_name: string | null }, creds: Record<string, unknown>) {
+async function saveAccount(env: Env, userId: string, row: { provider: ProviderKind; email_address: string; display_name: string | null; webmail_url?: string | null }, creds: Record<string, unknown>) {
   const db = serviceClient(env);
   const { data: existing } = await db.from('email_accounts').select('id').eq('user_id', userId).eq('provider', row.provider).eq('email_address', row.email_address).maybeSingle();
   let data: { id: string } | null = existing;
   if (existing) {
     // Reconnecting keeps the user's color, area and digest choices.
-    await db.from('email_accounts').update({ status: 'active', error_code: null, ...(row.display_name ? { display_name: row.display_name } : {}) }).eq('id', existing.id);
+    await db.from('email_accounts').update({ status: 'active', error_code: null, ...(row.display_name ? { display_name: row.display_name } : {}), ...(row.webmail_url ? { webmail_url: row.webmail_url } : {}) }).eq('id', existing.id);
   } else {
     const { count } = await db.from('email_accounts').select('id', { count: 'exact', head: true }).eq('user_id', userId);
     const ins = await db.from('email_accounts')
@@ -139,7 +140,7 @@ export async function connectImap(env: Env, userId: string, input: ImapInput) {
   } finally {
     await provider.close();
   }
-  const id = await saveAccount(env, userId, { provider: 'imap', email_address: input.email.toLowerCase(), display_name: null }, {
+  const id = await saveAccount(env, userId, { provider: 'imap', email_address: input.email.toLowerCase(), display_name: null, webmail_url: webmailForImapHost(input.host) }, {
     imap_host: input.host, imap_port: input.port, imap_username: input.username,
     imap_password_enc: await encrypt(env.EMAIL_TOKEN_KEY, input.password), imap_archive_folder: input.archive_folder ?? 'Archive',
   });
