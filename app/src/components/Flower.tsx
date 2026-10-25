@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
-import { View } from 'react-native';
+import { Image, View, type ImageStyle } from 'react-native';
+import { PHOTOS } from '../lib/photos';
+import { colors, isAviation } from '../theme';
 import Svg, { Circle, Defs, G, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 
 // A gerbera daisy drawn in vector form — crisp at any size, no image assets required.
@@ -16,7 +18,19 @@ interface Props {
   opacity?: number;
 }
 
-export function Flower({ size, seed = 0, opacity = 1 }: Props) {
+export function Flower(props: Props) {
+  // The aviation look has no flowers: a round navy badge with a classic plane instead.
+  if (isAviation) {
+    return (
+      <View style={{ width: props.size, height: props.size, borderRadius: props.size / 2, overflow: 'hidden', backgroundColor: colors.hero, opacity: props.opacity ?? 1 }}>
+        {PHOTOS.celebrate && <Image source={PHOTOS.celebrate} resizeMode="cover" style={[{ width: props.size, height: props.size }, { mixBlendMode: 'lighten' } as unknown as ImageStyle]} />}
+      </View>
+    );
+  }
+  return <GerberaFlower {...props} />;
+}
+
+function GerberaFlower({ size, seed = 0, opacity = 1 }: Props) {
   const c = 100;
   const layers = useMemo(() => {
     const ring = (count: number, len: number, width: number, offset: number, fill: string) =>

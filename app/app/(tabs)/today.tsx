@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
@@ -18,7 +19,7 @@ import { crunch, describeMinutes, minutesOf, staleTasks, type Crunch } from '../
 import type { Action, RecommendationKind } from '../../src/core/types';
 import { useStore } from '../../src/lib/store';
 import { usePlan, type Pick } from '../../src/lib/usePlan';
-import { colors, fonts, KIND_STYLE, radius } from '../../src/theme';
+import { colors, fonts, isAviation, KIND_STYLE, radius } from '../../src/theme';
 
 const FILTERS: { kind: RecommendationKind; label: string }[] = [
   { kind: 'time_sensitive', label: 'Time-sensitive' },
@@ -111,25 +112,37 @@ export default function Today() {
 
   return (
     <Screen>
-      <View style={{ position: 'absolute', right: -64, top: -48 }} pointerEvents="none">
-        <FlowerArt slot="header" width={210} height={210} seed={0.7} />
-      </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 8 }}>
-        <View style={{ flex: 1, paddingRight: 90 }}>
-          <H1 style={{ fontSize: 32 }}>{greeting()}</H1>
-          <Muted style={{ fontSize: 15, marginTop: 4 }}>Make something meaningful happen today.</Muted>
-          <Pressable
-            onPress={() => router.push({ pathname: '/day', params: { mode: checkin?.started_at ? 'end' : 'start' } })}
-            accessibilityRole="button"
-            style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 10, paddingVertical: 8, paddingHorizontal: 14,
-              borderRadius: radius.pill, backgroundColor: checkin?.ended_at ? colors.tealSoft : colors.card, borderWidth: 1, borderColor: checkin?.ended_at ? colors.tealSoft : colors.border }, pressed && { opacity: 0.7 }]}>
-            <Icon name={!checkin?.started_at ? 'sunrise' : checkin.ended_at ? 'check' : 'sunset'} size={15} color={checkin?.ended_at ? colors.teal : colors.pinkDeep} />
-            <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: checkin?.ended_at ? colors.teal : colors.pinkDeep }}>
-              {!checkin?.started_at ? 'Start my day' : checkin.ended_at ? 'Day wrapped' : 'End my day'}
-            </Text>
-          </Pressable>
+      {/* Momentum: a flower peeking in at the top right. Aviation: the header is a navy banner with a plane in it. */}
+      {!isAviation && (
+        <View style={{ position: 'absolute', right: -64, top: -48 }} pointerEvents="none">
+          <FlowerArt slot="header" width={210} height={210} seed={0.7} />
         </View>
-        <IconButton name="settings" label="Settings" onPress={() => router.push('/more')} />
+      )}
+      <View style={isAviation ? { marginTop: 8, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: colors.hero, padding: 18, paddingBottom: 20 } : undefined}>
+        {isAviation && (
+          <>
+            {/* Flat navy on the right, where the plane sits, so its backdrop blends in; a little depth on the left. */}
+            <LinearGradient colors={[colors.heroTop, colors.hero, colors.hero]} locations={[0, 0.5, 1]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+            <FlowerArt slot="header" width={230} height={160} bare style={{ position: 'absolute', right: -36, top: 6 }} />
+          </>
+        )}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: isAviation ? 0 : 8 }}>
+          <View style={{ flex: 1, paddingRight: 90 }}>
+            <H1 style={{ fontSize: 32, color: isAviation ? colors.heroText : colors.text }}>{greeting()}</H1>
+            <Muted style={{ fontSize: 15, marginTop: 4, color: isAviation ? colors.heroMuted : colors.textMuted }}>Make something meaningful happen today.</Muted>
+            <Pressable
+              onPress={() => router.push({ pathname: '/day', params: { mode: checkin?.started_at ? 'end' : 'start' } })}
+              accessibilityRole="button"
+              style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 10, paddingVertical: 8, paddingHorizontal: 14,
+                borderRadius: radius.pill, backgroundColor: checkin?.ended_at ? colors.tealSoft : colors.card, borderWidth: 1, borderColor: checkin?.ended_at ? colors.tealSoft : colors.border }, pressed && { opacity: 0.7 }]}>
+              <Icon name={!checkin?.started_at ? 'sunrise' : checkin.ended_at ? 'check' : 'sunset'} size={15} color={checkin?.ended_at ? colors.teal : colors.pinkDeep} />
+              <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: checkin?.ended_at ? colors.teal : colors.pinkDeep }}>
+                {!checkin?.started_at ? 'Start my day' : checkin.ended_at ? 'Day wrapped' : 'End my day'}
+              </Text>
+            </Pressable>
+          </View>
+          <IconButton name="settings" label="Settings" onPress={() => router.push('/more')} color={isAviation ? colors.heroText : colors.text} />
+        </View>
       </View>
 
       {!store.online && <Banner tone="soft" text={`You're offline. Changes are saved on this device${store.pending ? ` (${store.pending} waiting to sync)` : ''}.`} />}

@@ -69,11 +69,13 @@ export function Card({ children, style, onPress, accessibilityLabel }: { childre
   );
 }
 
-export function Button({ title, onPress, variant = 'primary', icon, loading, disabled, style }: {
+export function Button({ title, onPress, variant = 'primary', icon, loading, disabled, style, textColor }: {
   title: string; onPress: () => void; variant?: 'primary' | 'soft' | 'ghost'; icon?: IconName; loading?: boolean; disabled?: boolean; style?: StyleProp<ViewStyle>;
+  /** Overrides the label color (e.g. light text on a dark hero). */
+  textColor?: string;
 }) {
   const bg = variant === 'primary' ? colors.pink : variant === 'soft' ? colors.pinkSoft : 'transparent';
-  const fg = variant === 'primary' ? colors.white : colors.pinkDeep;
+  const fg = textColor ?? (variant === 'primary' ? colors.white : colors.pinkDeep);
   return (
     <Pressable
       onPress={onPress}
