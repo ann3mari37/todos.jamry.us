@@ -6,6 +6,7 @@ import { ProjectBanner } from '../../src/components/FlowerArt';
 import { Banner, Body, Button, Card, Chip, Divider, Field, H1, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, shortDate, timeOfDay } from '../../src/core/dates';
 import { goalProgress } from '../../src/core/recommend';
+import { suggestWhy } from '../../src/core/rules';
 import type { AccountabilityMode, Action, Goal, GoalStatus } from '../../src/core/types';
 import { api, friendlyAiError } from '../../src/lib/api';
 import { useStore } from '../../src/lib/store';
@@ -54,6 +55,7 @@ export default function Project() {
   const { done, total } = goalProgress(id, store.actions);
   const recent = store.accomplishments.filter((a) => a.goal_id === id).slice(0, 5);
   const area = store.lifeAreas.find((a) => a.id === goal?.life_area_id);
+  const suggestedWhy = goal ? suggestWhy(goal.title, { isProject: true, areaName: area?.name, due: goal.deadline ? { date: goal.deadline, type: goal.deadline_type } : null }) ?? '' : '';
 
   if (!goal) {
     return (
@@ -146,8 +148,13 @@ export default function Project() {
         <H1>{goal.title}</H1>
       </Pressable>
       <Pressable onPress={() => setSheet('meaning')}>
-        <Muted style={{ fontSize: 15, marginTop: 4 }}>{goal.meaning || 'Why does this matter to you? (optional)'}</Muted>
+        <Muted style={{ fontSize: 15, marginTop: 4 }}>{goal.meaning || `Suggested: ${suggestedWhy}`}</Muted>
       </Pressable>
+      {!goal.meaning && (
+        <Pressable onPress={() => update({ meaning: suggestedWhy, meaning_source: 'ai_suggested' })} accessibilityRole="button" style={{ alignSelf: 'flex-start', marginTop: 6, backgroundColor: colors.pinkWash, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
+          <Text style={{ color: colors.pinkDeep, fontFamily: fonts.medium, fontSize: 12 }}>Keep this reason</Text>
+        </Pressable>
+      )}
 
       <View style={{ marginVertical: 14 }}>
         <ProjectBanner height={130} seed={goal.title.length} />

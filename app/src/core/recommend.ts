@@ -3,7 +3,7 @@
 // AI may later rewrite the `reason` text, but never decides eligibility.
 
 import { daysSince, daysUntil, friendlyDate } from './dates';
-import { estimateMinutes } from './rules';
+import { estimateMinutes, suggestWhy } from './rules';
 import type {
   Action,
   DailyMode,
@@ -26,6 +26,8 @@ export interface RecommendInput {
   /** Days without meaningful progress before a goal is "quietly waiting". */
   inactivityDays?: number;
   includePaused?: boolean;
+  /** Used to word "why it matters" from the life area. */
+  lifeAreas?: { id: string; name: string }[];
 }
 
 const ACTIONABLE: Action['status'][] = ['ready', 'in_progress'];
@@ -124,6 +126,7 @@ export function recommend(input: RecommendInput): Recommendation[] {
 
   const goalOf = (a: Action) => (a.goal_id ? goalById.get(a.goal_id) ?? null : null);
   const areaOf = (a: Action | null) => (a ? a.life_area_id ?? goalOf(a)?.life_area_id ?? null : null);
+  const areaName = (a: Action) => input.lifeAreas?.find((x) => x.id === areaOf(a))?.name ?? null;
   const skipPenalty = (a: Action) => Math.min(a.times_skipped, 5) * 3;
   // First ready step of a goal (by sort order), so goals advance in order.
   const firstStep = (goalId: string) =>
@@ -195,7 +198,7 @@ export function recommend(input: RecommendInput): Recommendation[] {
       else if (almostDone) reason = `Only ${left} step${left === 1 ? '' : 's'} left on "${g.title}".`;
       else if (dueSoonish) reason = `"${g.title}" is due in ${due} days. A step now keeps it calm.`;
       else if (momentum) reason = `Keep the momentum going on "${g.title}".`;
-      else reason = `Moves "${g.title}" forward.`;
+      else reason = suggestWhy(g.title, { isProject: true, areaName: input.lifeAreas?.find((x) => x.id === g.life_area_id)?.name ?? null }) ?? `Moves "${g.title}" forward.`;
       return { a, g, score, reason };
     })
     .sort((x, y) => y.score - x.score);
@@ -259,30 +262,69 @@ export function recommend(input: RecommendInput): Recommendation[] {
     take('quietly_waiting', null, oldTask.a, `On your list for ${oldTask.days} days. Still want it?`, 17);
   }
 
-  // ── Mode shaping. Modes change emphasis, never add obligations.
+  // ── Next Up: Today is never empty. When the categories above found fewer than 3, fill with what's next on the list:
+  //    standalone tasks first, oldest first (they've waited longest), then next steps of projects.
+  const nextUp = (exclude: Set<string>) => ready
+    .filter((a) => !exclude.has(a.id))
+    .sort((x, y) => (x.goal_id ? 1 : 0) - (y.goal_id ? 1 : 0) || x.created_at.localeCompare(y.created_at));
+  const whyFor = (a: Action) => {
+    const g = goalOf(a);
+    return suggestWhy(a.title, { areaName: areaName(a), minutes: minutes(a), due: a.due_date ? { date: a.due_date, type: a.deadline_type ?? 'target' } : null, isProject: false })
+      ?? (g ? `Next step on "${g.title}".` : `About ${minutes(a)} min.`);
+  };
+
+  // ── Day types reshape the whole list (3–5 suggestions each) instead of adding a couple of extras.
   if (input.mode === 'small_tasks') {
-    const more = ready
-      .filter((a) => !usedActions.has(a.id) && minutes(a) <= 15)
-      .sort((x, y) => minutes(x) - minutes(y))
-      .slice(0, 2);
-    for (const a of more) take('easy_momentum', goalOf(a), a, 'Small and doable.', 25);
-    return out.sort((x, y) => (x.kind === 'easy_momentum' ? -1 : 0) - (y.kind === 'easy_momentum' ? -1 : 0));
-  }
-  if (input.mode === 'off_my_mind') {
-    // Lingering items: oldest open standalone actions.
-    const lingering = ready
-      .filter((a) => !usedActions.has(a.id))
-      .sort((x, y) => x.created_at.localeCompare(y.created_at))
-      .slice(0, 2);
-    for (const a of lingering) take('easy_momentum', goalOf(a), a, 'Been on your list a while. Clearing it frees up headspace.', 22);
-  }
-  if (input.mode === 'show_all') {
-    for (const a of ready.filter((x) => !usedActions.has(x.id)).slice(0, 6)) {
-      take(goalOf(a) ? 'meaningful_move' : 'easy_momentum', goalOf(a), a, minutesLabel(a) || 'Available now.', 10);
-    }
+    // The quickest things available, shortest first.
+    return ready
+      .filter((a) => minutes(a) <= 15 && !(input.excludeActionIds ?? []).includes(a.id))
+      .sort((x, y) => minutes(x) - minutes(y) || x.created_at.localeCompare(y.created_at))
+      .slice(0, 5)
+      .map((a) => ({ kind: 'easy_momentum' as const, goal: goalOf(a), action: a, reason: `About ${minutes(a)} min.`, score: 30 }));
   }
   if (input.mode === 'meaningful') {
-    out.sort((x, y) => (x.kind === 'meaningful_move' ? -1 : 0) - (y.kind === 'meaningful_move' ? -1 : 0));
+    // Next steps on the projects that matter most, then bigger standalone tasks, each with why it matters.
+    const picks: Recommendation[] = [];
+    const seenGoals = new Set<string>();
+    for (const c of goalCandidates) {
+      if (picks.length >= 3 || seenGoals.has(c.g.id)) continue;
+      seenGoals.add(c.g.id);
+      picks.push({ kind: 'meaningful_move', goal: c.g, action: c.a, reason: c.reason, score: c.score });
+    }
+    if (mm && !seenGoals.has(mm.g.id)) picks.unshift({ kind: 'meaningful_move', goal: mm.g, action: mm.a, reason: mm.reason, score: mm.score });
+    const big = ready
+      .filter((a) => !a.goal_id && minutes(a) > 15 && !picks.some((p) => p.action?.id === a.id))
+      .sort((x, y) => x.created_at.localeCompare(y.created_at));
+    for (const a of big) {
+      if (picks.length >= 5) break;
+      picks.push({ kind: 'meaningful_move', goal: null, action: a, reason: whyFor(a), score: 25 });
+    }
+    return picks.slice(0, 5);
+  }
+  if (input.mode === 'off_my_mind') {
+    // Overdue things, then follow-ups on what you're waiting for, then whatever has sat longest.
+    const picks: Recommendation[] = [];
+    const used = new Set<string>();
+    const push = (r: Recommendation) => { if (r.action && !used.has(r.action.id) && picks.length < 5) { used.add(r.action.id); picks.push(r); } };
+    for (const a of ready.filter((x) => (actionDueDays(x, now) ?? 1) < 0).sort((x, y) => (x.due_date ?? '').localeCompare(y.due_date ?? ''))) {
+      push({ kind: 'time_sensitive', goal: goalOf(a), action: a, reason: `Was due ${friendlyDate(a.due_date!, now)}. Clearing it takes it off your mind.`, score: 40 });
+    }
+    for (const a of input.actions.filter((x) => x.status === 'waiting' && !resting.has(x.id))) {
+      const days = daysSince(a.created_at, now) ?? 0;
+      if (days >= 3) push({ kind: 'quietly_waiting', goal: goalOf(a), action: a, reason: `Waiting for ${days} days. A quick follow-up could close it.`, score: 30 });
+    }
+    for (const a of nextUp(used)) {
+      const days = daysSince(a.created_at, now) ?? 0;
+      push({ kind: 'next_up', goal: goalOf(a), action: a, reason: days >= 2 ? `On your list for ${days} days. Done is lighter than waiting.` : 'Clearing it frees up headspace.', score: 20 });
+    }
+    return picks;
+  }
+
+  const shown = new Set(out.map((r) => r.action?.id).filter(Boolean) as string[]);
+  const fillTo = input.mode === 'show_all' ? 12 : 3;
+  for (const a of nextUp(shown)) {
+    if (out.length >= fillTo) break;
+    take('next_up', goalOf(a), a, whyFor(a), 10);
   }
   return out;
 }
@@ -292,4 +334,5 @@ export const KIND_LABEL: Record<RecommendationKind, string> = {
   time_sensitive: 'Time-Sensitive',
   easy_momentum: 'Easy Momentum',
   quietly_waiting: 'Quietly Waiting',
+  next_up: 'Next Up',
 };

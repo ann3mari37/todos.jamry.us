@@ -8,19 +8,19 @@ import { FlowerArt } from '../../src/components/FlowerArt';
 import { OrganizeSheet } from '../../src/components/OrganizeSheet';
 import { TaskList, useOpenTasks } from '../../src/components/TaskList';
 import { Ring } from '../../src/components/Ring';
-import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
+import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption, type IconName } from '../../src/components/ui';
 import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay } from '../../src/core/dates';
 import { KIND_LABEL, readyActions, remainingSteps } from '../../src/core/recommend';
 import type { DailyMode } from '../../src/core/types';
 import { useStore } from '../../src/lib/store';
 import { usePlan, type Pick } from '../../src/lib/usePlan';
-import { colors, fonts, KIND_STYLE } from '../../src/theme';
+import { colors, fonts, KIND_STYLE, radius } from '../../src/theme';
 
-const MODES: { value: DailyMode; label: string }[] = [
-  { value: 'meaningful', label: 'Move something meaningful' },
-  { value: 'small_tasks', label: 'A few small tasks' },
-  { value: 'off_my_mind', label: 'Get something off my mind' },
-  { value: 'show_all', label: "Show me what's available" },
+const MODES: { value: DailyMode; label: string; hint: string; icon: IconName }[] = [
+  { value: 'meaningful', label: 'Move something meaningful', hint: 'Projects that matter, bigger tasks', icon: 'heart' },
+  { value: 'small_tasks', label: 'A few small tasks', hint: 'Your quickest wins, 15 min or less', icon: 'feather' },
+  { value: 'off_my_mind', label: 'Get something off my mind', hint: 'Overdue, waiting, and oldest items', icon: 'wind' },
+  { value: 'show_all', label: "Show me what's available", hint: 'Everything ready right now', icon: 'list' },
 ];
 
 export default function Today() {
@@ -28,7 +28,6 @@ export default function Today() {
   const plan = usePlan();
   const [tab, setTab] = useState<'today' | 'week' | 'areas'>('today');
   const [selected, setSelected] = useState<(typeof plan.picks)[number] | null>(null);
-  const [showModes, setShowModes] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [organizing, setOrganizing] = useState(false);
   const [organized, setOrganized] = useState<{ text: string; runId: string } | null>(null);
@@ -145,6 +144,8 @@ export default function Today() {
             </Card>
           )}
 
+          <DayType mode={plan.mode} onChange={(m) => { plan.setMode(m); setNote(null); }} />
+
           {plan.finished && (
             <Card style={{ backgroundColor: colors.pinkWash, alignItems: 'center', paddingVertical: 22 }}>
               <Flower size={64} seed={2} />
@@ -196,15 +197,6 @@ export default function Today() {
           )}
           {note && <Banner text={note} />}
 
-          <Pressable onPress={() => setShowModes((v) => !v)} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, minHeight: 44 }}>
-            <Icon name="sliders" size={16} color={colors.textMuted} />
-            <Muted>{plan.mode ? MODES.find((m) => m.value === plan.mode)?.label : 'What kind of day is it? (optional)'}</Muted>
-          </Pressable>
-          {showModes && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-              {MODES.map((m) => <Chip key={m.value} label={m.label} selected={plan.mode === m.value} onPress={() => { plan.setMode(plan.mode === m.value ? null : m.value); setShowModes(false); }} />)}
-            </View>
-          )}
 
           <Label>{plan.picks.length ? 'Everything else on your list' : 'Your list'}</Label>
           <TaskList tasks={otherTasks} limit={6} emptyText="Nothing else on your list." />
@@ -291,5 +283,45 @@ function AreasTab() {
         );
       })}
     </>
+  );
+}
+
+/** "What kind of day is it?" — each choice swaps in its own set of 3–5 suggestions. */
+function DayType({ mode, onChange }: { mode: DailyMode | null; onChange: (m: DailyMode | null) => void }) {
+  const current = MODES.find((m) => m.value === mode);
+  if (current) {
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.pinkWash, borderRadius: radius.lg, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12 }}>
+        <Icon name={current.icon} size={18} color={colors.pinkDeep} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: fonts.semibold, color: colors.pinkDeep, fontSize: 14 }}>{current.label}</Text>
+          <Muted style={{ fontSize: 12 }}>{current.hint}</Muted>
+        </View>
+        <Pressable onPress={() => onChange(null)} accessibilityRole="button" hitSlop={8} style={{ minHeight: 36, justifyContent: 'center' }}>
+          <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep, fontSize: 13 }}>Usual picks</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  return (
+    <Card style={{ paddingBottom: 8 }}>
+      <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.text }}>What kind of day is it?</Text>
+      <Muted style={{ marginTop: 2, marginBottom: 10 }}>Pick one and your suggestions change to fit.</Muted>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {MODES.map((m) => (
+          <Pressable
+            key={m.value}
+            onPress={() => onChange(m.value)}
+            accessibilityRole="button"
+            accessibilityLabel={`${m.label}. ${m.hint}`}
+            style={({ pressed }) => [{ flexBasis: '48%', flexGrow: 1, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.cardSoft, padding: 12, minHeight: 72 }, pressed && { opacity: 0.7 }]}
+          >
+            <Icon name={m.icon} size={18} color={colors.pink} />
+            <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text, marginTop: 6 }}>{m.label}</Text>
+            <Muted style={{ fontSize: 11, marginTop: 2 }}>{m.hint}</Muted>
+          </Pressable>
+        ))}
+      </View>
+    </Card>
   );
 }

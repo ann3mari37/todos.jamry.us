@@ -10,7 +10,7 @@ export type ActionStatus =
   | 'completed'
   | 'dismissed';
 export type DeadlineType = 'none' | 'target' | 'hard';
-export type RecommendationKind = 'meaningful_move' | 'time_sensitive' | 'easy_momentum' | 'quietly_waiting';
+export type RecommendationKind = 'meaningful_move' | 'time_sensitive' | 'easy_momentum' | 'quietly_waiting' | 'next_up';
 export type AccountabilityMode = 'default' | 'keep_visible' | 'help_me' | 'i_avoid_this' | 'do_not_remind';
 export type DailyMode = 'meaningful' | 'small_tasks' | 'off_my_mind' | 'show_all';
 

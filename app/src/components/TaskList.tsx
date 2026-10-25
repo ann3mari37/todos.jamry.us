@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { daysUntil, friendlyDate, toISODate } from '../core/dates';
+import { looksLikeProject, suggestWhy } from '../core/rules';
 import type { Action, DeadlineType } from '../core/types';
 import { useStore } from '../lib/store';
 import { colors, fonts } from '../theme';
@@ -66,6 +67,19 @@ export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?:
 
   const live = open ? store.actions.find((a) => a.id === open.id) ?? open : null;
   const openGoal = live?.goal_id ? store.goals.find((g) => g.id === live.goal_id) : null;
+  const openArea = live ? store.lifeAreas.find((x) => x.id === (live.life_area_id ?? openGoal?.life_area_id)) : null;
+  const why = live ? suggestWhy(live.title, { areaName: openArea?.name, minutes: live.estimated_minutes, due: live.due_date ? { date: live.due_date, type: live.deadline_type ?? 'target' } : null }) : null;
+  const projectLike = !!live && !live.goal_id && looksLikeProject(live.title);
+
+  const makeProject = async (a: Action) => {
+    close();
+    const g = await store.createGoal({
+      title: a.title, life_area_id: a.life_area_id, deadline: a.due_date ?? null, deadline_type: a.due_date ? a.deadline_type ?? 'target' : 'none',
+      meaning: suggestWhy(a.title, { isProject: true, areaName: openArea?.name }), meaning_source: 'ai_suggested',
+    });
+    await store.updateAction(a.id, { status: 'dismissed' }); // the project replaces the task
+    if (g) router.push({ pathname: '/project/[id]', params: { id: g.id } });
+  };
 
   return (
     <View>
@@ -101,7 +115,9 @@ export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?:
       <Sheet visible={!!live} onClose={close} title={live?.title}>
         {live && panel === 'menu' && (
           <>
+            {why && <Muted style={{ marginBottom: 6 }}>Why it matters: {why}</Muted>}
             <SheetOption icon="check-circle" label="Mark done" onPress={() => complete(live)} />
+            {projectLike && <SheetOption icon="folder-plus" label="Turn into a project (it has several steps)" onPress={() => makeProject(live)} />}
             <SheetOption icon="calendar" label={live.due_date ? `Due date: ${friendlyDate(live.due_date)}` : 'Set a due date'} onPress={() => setPanel('due')} />
             {!live.goal_id && <SheetOption icon="grid" label={`Life area: ${store.lifeAreas.find((x) => x.id === live.life_area_id)?.name ?? 'none'}`} onPress={() => setPanel('area')} />}
             {openGoal && <SheetOption icon="folder" label={`Open project: ${openGoal.title}`} onPress={() => { close(); router.push({ pathname: '/project/[id]', params: { id: openGoal.id } }); }} />}

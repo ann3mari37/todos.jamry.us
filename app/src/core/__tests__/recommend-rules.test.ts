@@ -94,3 +94,43 @@ describe('Quietly Waiting', () => {
     expect(r?.reason).not.toMatch(/behind|fail|should/i);
   });
 });
+
+describe('Next Up and day types', () => {
+  // Like the user's real list: standalone, undated, new tasks that fit no category.
+  const mine = () => [
+    action({ title: 'Update my crm', estimated_minutes: null, created_at: '2026-10-19T10:00:00Z', life_area_id: 'work' }),
+    action({ title: 'Clean my laundry', estimated_minutes: null, created_at: '2026-10-19T10:01:00Z' }),
+    action({ title: 'Cook dinner', estimated_minutes: null, created_at: '2026-10-19T10:02:00Z' }),
+    action({ title: 'Create a project management app for Malinda', estimated_minutes: null, created_at: '2026-10-19T10:03:00Z', life_area_id: 'work' }),
+  ];
+  const areas = [{ id: 'work', name: 'Work' }];
+
+  it('never leaves Today empty: fills to 3 with Next Up', () => {
+    const recs = recommend({ goals: [], actions: mine(), now: NOW, lifeAreas: areas });
+    expect(recs).toHaveLength(3);
+    expect(recs.some((r) => r.kind === 'easy_momentum')).toBe(true);
+    expect(recs.filter((r) => r.kind === 'next_up').length).toBeGreaterThan(0);
+  });
+  it('"A few small tasks" lists the quickest things only', () => {
+    const recs = recommend({ goals: [], actions: mine(), now: NOW, mode: 'small_tasks' });
+    expect(recs.map((r) => r.action?.title)).toEqual(['Update my crm', 'Clean my laundry']);
+    expect(recs.every((r) => r.kind === 'easy_momentum')).toBe(true);
+  });
+  it('"Move something meaningful" offers bigger tasks with why they matter', () => {
+    const recs = recommend({ goals: [], actions: mine(), now: NOW, mode: 'meaningful', lifeAreas: areas });
+    const app = recs.find((r) => r.action?.title.startsWith('Create a project'));
+    expect(app?.reason).toBe('Turns an idea into something real.');
+    expect(recs.find((r) => r.action?.title === 'Cook dinner')).toBeTruthy();
+    expect(recs.find((r) => r.action?.title === 'Clean my laundry')).toBeUndefined(); // quick → not "meaningful" mode
+  });
+  it('"Get something off my mind" leads with overdue, then waiting, then oldest', () => {
+    const overdue = action({ title: 'Return package', due_date: '2026-10-15', deadline_type: 'target' });
+    const waiting = action({ title: 'Hear back from landlord', status: 'waiting', created_at: '2026-10-14T00:00:00Z' });
+    const recs = recommend({ goals: [], actions: [...mine(), overdue, waiting], now: NOW, mode: 'off_my_mind' });
+    expect(recs.slice(0, 2).map((r) => r.action?.title)).toEqual(['Return package', 'Hear back from landlord']);
+    expect(recs).toHaveLength(5);
+  });
+  it('"Show me what\'s available" lists everything ready', () => {
+    expect(recommend({ goals: [], actions: mine(), now: NOW, mode: 'show_all' })).toHaveLength(4);
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fallbackInterpret } from '../fallback-capture';
-import { estimateMinutes, guessLifeArea, matchProject, parseDue, stripDue, triageEmail } from '../rules';
+import { estimateMinutes, guessLifeArea, looksLikeProject, matchProject, parseDue, stripDue, suggestWhy, triageEmail } from '../rules';
 
 const NOW = new Date(2026, 9, 24, 10); // Saturday, Oct 24 2026
 const due = (t: string) => parseDue(t, NOW);
@@ -101,5 +101,21 @@ describe('custom area keywords', () => {
     expect(guessLifeArea('Create a project management app for MaLInda', custom)).toBe('work');
     expect(guessLifeArea('Bring snacks to church', custom)).toBe('church');
     expect(guessLifeArea('Clean the garage', custom)).toBe('home');
+  });
+});
+
+describe('why it matters + project detection', () => {
+  it('suggests a reason for anything that is not quick, and none for quick tasks', () => {
+    expect(suggestWhy('Pay the electric bill by Friday', { minutes: 30 })).toBe('Keeps your finances on track and avoids late fees or penalties.');
+    expect(suggestWhy('Create a project management app for Malinda')).toBe('Turns an idea into something real.');
+    expect(suggestWhy('Sort old photos', { areaName: 'Home', minutes: 60 })).toBe('A calmer, easier home to live in.');
+    expect(suggestWhy('Renew passport', { isProject: true, due: { date: '2026-11-01', type: 'hard' } })).toBe('It has a real deadline. Gets an obligation off your mind for good.');
+    expect(suggestWhy('Reply to Maya')).toBeNull(); // quick
+  });
+  it('spots tasks that are really projects', () => {
+    expect(looksLikeProject('Create a project management app for Malinda')).toBe(true);
+    expect(looksLikeProject('Paint my garage')).toBe(true);
+    expect(looksLikeProject('Call the dentist')).toBe(false);
+    expect(looksLikeProject('Plan')).toBe(false);
   });
 });

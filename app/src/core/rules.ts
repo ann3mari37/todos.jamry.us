@@ -86,7 +86,8 @@ export function stripDue(title: string, due: ParsedDue | null): string {
 const MINUTE_RULES: [RegExp, number][] = [
   [/\b(text|reply|respond|rsvp|confirm|remind)\b/i, 5],
   [/\b(call|phone|email|message|book|schedule|order|pay|renew|cancel|sign|submit|send|mail|print|return)\b/i, 10],
-  [/\b(clean|tidy|wash|water|sort|pick up|drop off|buy|shop|groceries|review|check)\b/i, 15],
+  [/\b(update|edit|log|note|file|back ?up|fill (out|in)|clean|tidy|wash|water|sort|pick up|drop off|buy|shop|groceries|review|check|laundry)\b/i, 15],
+  [/\b(prepare|plan|organi[sz]e|fix|repair|cook|bake)\b/i, 30],
   [/\b(read|write|draft|research|study|practice|workout|exercise|run|walk|yoga|cook|meal prep)\b/i, 30],
   [/\b(meeting|appointment|class|lesson|doctor|dentist)\b/i, 60],
 ];
@@ -97,6 +98,59 @@ export function estimateMinutes(title: string): number | null {
   if (explicit) return Math.min(600, Number(explicit[1]) * (/^h/i.test(explicit[2]) ? 60 : 1));
   for (const [re, minutes] of MINUTE_RULES) if (re.test(title)) return minutes;
   return null;
+}
+
+// ───────────────────────── Why it matters ─────────────────────────
+
+// Specific wording wins; then the life area; then a general line for projects. Gentle, factual, never pushy.
+const WHY_BY_WORDS: [RegExp, string][] = [
+  // Paperwork first, so "Renew passport" reads as an obligation rather than money.
+  [/\b(document|form|application|submit|passport|license|licence|permit|visa|register)\b/i, 'Gets an obligation off your mind for good.'],
+  [/\b(pay|bill|rent|tax|taxes|invoice|insurance|renew|bank|budget|loan|mortgage)\b/i, 'Keeps your finances on track and avoids late fees or penalties.'],
+  [/\b(doctor|dentist|meds|medication|prescription|workout|exercise|gym|therapy|checkup|physio)\b/i, 'Looking after your health now saves bigger problems later.'],
+  [/\b(mom|dad|mother|father|friend|family|birthday|kids|son|daughter|wife|husband|partner|anniversary|wedding)\b/i, 'Time and care for the people who matter to you.'],
+  [/\b(client|crm|customer|boss|team|report|proposal|meeting|presentation|deadline)\b/i, 'Keeps your work, and the people relying on it, moving.'],
+  [/\b(app|website|site|launch|business|product|portfolio|book)\b/i, 'Turns an idea into something real.'],
+  [/\b(garage|clean|laundry|kitchen|declutter|organi[sz]e|repair|paint|closet|yard|garden)\b/i, 'A calmer, easier home to live in.'],
+  [/\b(learn|course|study|practice|class|language|guitar|piano)\b/i, "An investment in who you're becoming."],
+];
+const WHY_BY_AREA: Record<string, string> = {
+  home: 'A calmer, easier home to live in.',
+  work: 'Keeps your work, and the people relying on it, moving.',
+  health: 'Looking after your health now saves bigger problems later.',
+  finances: 'Keeps your finances on track and avoids surprises.',
+  relationships: 'Time and care for the people who matter to you.',
+  'personal growth': "An investment in who you're becoming.",
+};
+
+/**
+ * A suggested "why it matters" for anything that isn't a quick task. Returns null for quick tasks (15 min or less),
+ * which don't need a reason to be done.
+ */
+export function suggestWhy(
+  title: string,
+  opts: { areaName?: string | null; isProject?: boolean; minutes?: number | null; due?: { date: string; type: string } | null; now?: Date } = {},
+): string | null {
+  const minutes = opts.minutes ?? estimateMinutes(title);
+  if (!opts.isProject && minutes !== null && minutes <= 15) return null;
+  const base = WHY_BY_WORDS.find(([re]) => re.test(title))?.[1]
+    ?? (opts.areaName ? WHY_BY_AREA[opts.areaName.trim().toLowerCase()] : undefined)
+    // No area yet: use the built-in area hints ("hooks" → home) to pick the wording.
+    ?? WHY_BY_AREA[Object.keys(AREA_HINTS).find((k) => AREA_HINTS[k].test(title)) ?? '']
+    ?? (opts.isProject || looksLikeProject(title) ? 'Finishing this frees up space in your head.' : 'One less thing waiting on your list.');
+  if (opts.due && opts.due.type === 'hard') return `It has a real deadline. ${base}`;
+  return base;
+}
+
+// ───────────────────────── Project detection ─────────────────────────
+
+const PROJECT_WORDS = /\b(create|build|start|launch|design|develop|plan|organi[sz]e|renovate|remodel|redo|overhaul|set up|write (a|an|my|the)|learn|move|declutter|paint|prepare for|get .* in order)\b/i;
+
+/** A task that reads like an outcome needing several steps ("Create a project management app for Malinda"). */
+export function looksLikeProject(title: string): boolean {
+  const words = title.trim().split(/\s+/).length;
+  const minutes = estimateMinutes(title);
+  return words >= 3 && PROJECT_WORDS.test(title) && (minutes === null || minutes > 30);
 }
 
 // ───────────────────────── Life areas ─────────────────────────

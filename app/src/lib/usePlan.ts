@@ -17,6 +17,8 @@ interface Plan {
   picks: Pick[];
   /** Everything ever shown today, so "something else" doesn't cycle back. */
   shown: string[];
+  /** When the picks were last chosen; tasks added after this can fill open slots. */
+  builtAt?: string;
 }
 
 const key = (d: string) => `momentum.plan.${d}`;
@@ -46,8 +48,8 @@ export function usePlan() {
   const compute = useCallback((mode: DailyMode | null, exclude: string[] = []): Recommendation[] =>
     recommend({
       goals: store.goals, actions: store.actions, dependencies: store.dependencies, feedback: store.feedback,
-      mode, excludeActionIds: exclude, inactivityDays: store.accountability?.inactivity_days,
-    }), [store.goals, store.actions, store.dependencies, store.feedback, store.accountability]);
+      mode, excludeActionIds: exclude, inactivityDays: store.accountability?.inactivity_days, lifeAreas: store.lifeAreas,
+    }), [store.goals, store.actions, store.dependencies, store.feedback, store.accountability, store.lifeAreas]);
 
   const toPick = (r: Recommendation): Pick => ({ kind: r.kind, action_id: r.action?.id ?? null, goal_id: r.goal?.id ?? null, reason: r.reason });
 
@@ -57,12 +59,26 @@ export function usePlan() {
     if (!ready || store.loading || (plan && plan.shown.length > 0)) return;
     const recs = compute(plan?.mode ?? null);
     if (recs.length === 0) return;
-    persist({ date: today, mode: plan?.mode ?? null, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id ?? `goal:${r.goal?.id}`) });
+    persist({ date: today, mode: plan?.mode ?? null, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id ?? `goal:${r.goal?.id}`), builtAt: new Date().toISOString() });
   }, [ready, plan, store.loading, compute, persist, today]);
+
+  // New tasks captured after today's picks were chosen fill open slots (up to 3 open suggestions).
+  // Finished picks are never replaced on their own — "Finished for now" still means finished.
+  useEffect(() => {
+    if (!plan || plan.mode || store.loading) return;
+    const builtAt = plan.builtAt ?? `${plan.date}T00:00:00`;
+    const added = store.actions.filter((a) => a.created_at > builtAt && ['ready', 'in_progress'].includes(a.status) && !plan.shown.includes(a.id));
+    if (!added.length) return;
+    const open = plan.picks.filter((p) => !p.action_id || store.actions.find((a) => a.id === p.action_id)?.status !== 'completed').length;
+    const slots = Math.max(0, 3 - open);
+    const addedIds = new Set(added.map((a) => a.id));
+    const fresh = slots ? compute(null, plan.shown).filter((r) => r.action && addedIds.has(r.action.id)).slice(0, slots) : [];
+    persist({ ...plan, picks: [...plan.picks, ...fresh.map(toPick)], shown: [...plan.shown, ...fresh.map((r) => r.action!.id)], builtAt: new Date().toISOString() });
+  }, [plan, store.actions, store.loading, compute, persist]);
 
   const setMode = useCallback((mode: DailyMode | null) => {
     const recs = compute(mode);
-    persist({ date: today, mode, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id).filter(Boolean) as string[] });
+    persist({ date: today, mode, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id).filter(Boolean) as string[], builtAt: new Date().toISOString() });
   }, [compute, persist, today]);
 
   /** "Show me something else": swap one pick for a fresh suggestion. */

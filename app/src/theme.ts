@@ -50,6 +50,7 @@ export const KIND_STYLE = {
   time_sensitive: { color: colors.amber, soft: colors.amberSoft, icon: 'calendar' },
   easy_momentum: { color: colors.green, soft: colors.greenSoft, icon: 'feather' },
   quietly_waiting: { color: colors.lavender, soft: colors.lavenderSoft, icon: 'rotate-cw' },
+  next_up: { color: colors.teal, soft: colors.tealSoft, icon: 'arrow-right-circle' },
 } as const;
 
 export const AREA_COLORS = ['#F07A8C', '#3FA7A3', '#7DB46C', '#F2B84B', '#F59A6B', '#A98BDB', '#9CA3AF', '#6C9BD2'];
