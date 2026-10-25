@@ -8,7 +8,7 @@ import { friendlyDate, startOfDay, timeOfDay } from '../../src/core/dates';
 import { friendlyAiError } from '../../src/lib/api';
 import { useStore, uuid, type EmailMessage } from '../../src/lib/store';
 import { CATEGORY_META, InboxBriefing, OpenInMail, useInboxBriefing } from '../../src/components/EmailBits';
-import { isAutomated, notificationGroups, senderLabel, type NotificationGroup } from '../../src/core/emailBrief';
+import { isAutomated, notificationGroups, senderFull, senderLabel, type NotificationGroup } from '../../src/core/emailBrief';
 import { colors, fonts, radius } from '../../src/theme';
 
 type Tab = 'first' | 'waiting' | 'rest';
@@ -114,6 +114,7 @@ export default function Inbox() {
                           </View>
                           <View style={{ flex: 1 }}>
                             <Body style={{ fontFamily: g.unread ? fonts.semibold : fonts.medium }}>{g.sender} · {g.count} notification{g.count === 1 ? '' : 's'}</Body>
+                            {g.latest.from_address && <Muted numberOfLines={1} style={{ fontSize: 12 }}>{g.latest.from_address}</Muted>}
                             <Muted numberOfLines={1}>{g.count > 1 && g.topic ? `Mostly “${g.topic}”` : g.latest.subject} · {when(g.latest.received_at)}</Muted>
                           </View>
                           <Icon name={expanded === g.sender ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textFaint} />
@@ -146,7 +147,8 @@ function MessageRow({ m, color, onPress, rank, why, compact }: { m: EmailMessage
   const store = useStore();
   const meta = CATEGORY_META[m.category ?? 'other'];
   const area = store.lifeAreas.find((a) => a.id === m.life_area_id);
-  const name = isAutomated(m) ? senderLabel(m) : m.from_name || m.from_address || 'Unknown sender';
+  const name = senderLabel(m);
+  const address = m.from_address && m.from_address !== name ? m.from_address : null;
   return (
     <Card onPress={onPress} accessibilityLabel={`${m.is_unread ? 'Unread. ' : ''}${name}: ${m.subject ?? ''}`} style={{ paddingVertical: 14 }}>
       <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -160,6 +162,7 @@ function MessageRow({ m, color, onPress, rank, why, compact }: { m: EmailMessage
             <Body numberOfLines={1} style={{ flex: 1, fontFamily: m.is_unread ? fonts.semibold : fonts.medium, fontSize: 14 }}>{name}</Body>
             <Muted style={{ fontSize: 12 }}>{when(m.received_at)}</Muted>
           </View>
+          {address && <Muted numberOfLines={1} style={{ fontSize: 12 }}>{address}</Muted>}
           <Body numberOfLines={1} style={{ fontFamily: fonts.medium, fontSize: 15, marginTop: 2 }}>{m.subject || '(no subject)'}</Body>
           {why ? <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.pinkDeep, marginTop: 3 }}>{rank ? `${rank}. ` : ''}{why}</Text> : null}
           {!compact && <Muted numberOfLines={2} style={{ marginTop: 3 }}>{isAutomated(m) ? '' : m.summary ?? m.snippet ?? ''}</Muted>}
@@ -229,7 +232,7 @@ function MessageSheet({ m, onClose }: { m: EmailMessage | null; onClose: () => v
     <Sheet visible onClose={onClose} title={live.subject || '(no subject)'}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: account?.color ?? colors.teal }} />
-        <Muted numberOfLines={1} style={{ flex: 1 }}>{live.from_name ?? live.from_address} · {when(live.received_at)} · {account?.display_name || account?.email_address}</Muted>
+        <Muted numberOfLines={2} style={{ flex: 1 }}>From {senderFull(live)} · {when(live.received_at)} · to {account?.display_name || account?.email_address}</Muted>
         <View style={{ backgroundColor: meta.soft, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 }}>
           <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: meta.color }}>{meta.label}</Text>
         </View>

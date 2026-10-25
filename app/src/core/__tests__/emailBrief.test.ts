@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { briefingParts, doFirst, emailLink, isAutomated, notificationGroups, oneLine, plainBriefing, rulesBriefing, senderLabel, subjectKey, type BriefMessage } from '../emailBrief';
+import { briefingParts, doFirst, emailLink, isAutomated, notificationGroups, oneLine, senderFull, plainBriefing, rulesBriefing, senderLabel, subjectKey, type BriefMessage } from '../emailBrief';
 
 const now = new Date('2026-10-26T15:00:00');
 const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
@@ -30,15 +30,17 @@ describe('email briefing rules', () => {
     expect(isAutomated({ from_address: 'hello@notify.railway.app', category: 'fyi' })).toBe(true);
     expect(isAutomated({ from_address: 'team@mail.anthropic.com', category: 'personal' })).toBe(true);
     expect(isAutomated({ from_address: 'joe.smith@outlook.com', category: 'personal' })).toBe(false);
+    expect(senderLabel({ from_name: null, from_address: 'joe.smith@outlook.com', category: 'personal' })).toBe('joe.smith@outlook.com');
+    expect(senderFull({ from_name: 'Dana Whitfield', from_address: 'dana@firm.com', category: 'personal' })).toBe('Dana Whitfield · dana@firm.com');
     expect(senderLabel({ from_name: 'ann3mari37', from_address: 'notifications@github.com', category: 'fyi' })).toBe('GitHub');
-    expect(senderLabel({ from_name: 'Dana Whitfield', from_address: 'dana@firm.com', category: 'personal' })).toBe('Dana');
+    expect(senderLabel({ from_name: 'Dana Whitfield', from_address: 'dana@firm.com', category: 'personal' })).toBe('Dana Whitfield');
     expect(subjectKey('[ann3mari37/todos.jamry.us] Run failed: Test & deploy - main (4a7f3c2e)')).toBe('Run failed: Test & deploy - main');
   });
 
   it('puts people with requests and real bills first, and never alerts, notifications or "no reply needed"', () => {
     const list = inbox();
     const first = doFirst(list, [], now).map((f) => senderLabel(list.find((m) => m.id === f.message_id)!));
-    expect(first).toEqual(['Dana', 'Maya', 'Acme Insurance']);
+    expect(first).toEqual(['Dana Whitfield', 'Maya Chen', 'Acme Insurance']);
   });
 
   it('groups notifications by service with their usual topic', () => {
@@ -49,7 +51,7 @@ describe('email briefing rules', () => {
 
   it('uses the subject, not the raw preview, for machine mail', () => {
     expect(oneLine(ci(9))).toMatch(/^GitHub: Run failed: Test & deploy/);
-    expect(oneLine(inbox()[0])).toBe('Dana: Can you send the signed cover page before Thursday?');
+    expect(oneLine(inbox()[0])).toBe('Dana Whitfield: Can you send the signed cover page before Thursday?');
   });
 
   it('writes a short, readable summary with each email marked as a reference', () => {
@@ -57,9 +59,9 @@ describe('email briefing rules', () => {
     const b = rulesBriefing(list, [], now);
     const id = (who: string) => list.find((m) => m.from_name?.startsWith(who))!.id;
     expect(b.summary).toBe(
-      `3 emails need you. Start with [[email:${id('Dana')}|Dana · Document review]] — Can you send the signed cover page before Thursday? `
-      + `Then [[email:${id('Maya')}|Maya · Saturday?]] and [[email:${id('Acme')}|Acme Insurance · Your policy renews November 1]]. `
-      + `Nothing urgent from people: [[email:${id('Sam')}|Sam · Photos from the shoot]]. `
+      `3 emails need you. Start with [[email:${id('Dana')}|Dana Whitfield · Document review]] — Can you send the signed cover page before Thursday? `
+      + `Then [[email:${id('Maya')}|Maya Chen · Saturday?]] and [[email:${id('Acme')}|Acme Insurance · Your policy renews November 1]]. `
+      + `Nothing urgent from people: [[email:${id('Sam')}|Sam Ortiz · Photos from the shoot]]. `
       + 'Notifications: 5 from GitHub (mostly “Run failed: Test & deploy - main”) and 1 from The Weekly Bloom.',
     );
     expect(b.summary).not.toMatch(/Repository:|Duration:/);

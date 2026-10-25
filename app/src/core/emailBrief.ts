@@ -59,9 +59,17 @@ export function senderLabel(m: Pick<BriefMessage, 'from_name' | 'from_address' |
     const parts = domain.split('.').filter(Boolean);
     const org = parts.length >= 2 ? parts[parts.length - 2] : parts[0] ?? '';
     if (org) return NICE[org.toLowerCase()] ?? org.charAt(0).toUpperCase() + org.slice(1);
-    return (m.from_name || 'A service').replace(/["']/g, '');
+    return (m.from_name || m.from_address || 'A service').replace(/["']/g, '');
   }
-  return (m.from_name || m.from_address || 'Someone').replace(/["']/g, '').split(/[\s@<]/)[0];
+  // People by their full name, so two Danas never look the same; no name → the address itself.
+  const name = (m.from_name ?? '').replace(/["']/g, '').trim();
+  return name && !name.includes('@') ? name : m.from_address || 'Unknown sender';
+}
+
+/** "Dana Whitfield · dana@firm.com" — who sent it, unmistakably (just the address when there's no name). */
+export function senderFull(m: Pick<BriefMessage, 'from_name' | 'from_address' | 'category'>): string {
+  const label = senderLabel(m);
+  return m.from_address && label !== m.from_address ? `${label} · ${m.from_address}` : label;
 }
 
 /** The subject without reply prefixes, bracket tags, ids and numbers, for spotting repeats ("Run failed: Test & deploy"). */
@@ -309,9 +317,12 @@ export function rulesBriefing(msgs: BriefMessage[], projects: { id: string; titl
   }
   const groups = notificationGroups(live.filter((m) => !firstIds.has(m.id) && m.category !== 'waiting_on'));
   if (groups.length) {
-    const top = groups.slice(0, 3).map((g) => `${g.count} from ${g.sender}${g.count > 2 && g.topic ? ` (mostly “${clip(g.topic, 40)}”)` : ''}`);
-    const others = groups.slice(3).reduce((s, g) => s + g.count, 0);
-    parts.push(`Notifications: ${listJoin(others ? [...top, `${others} more`] : top)}.`);
+    // Every sender named (up to six); past that, how many more and from how many senders.
+    const shown = groups.length <= 6 ? groups : groups.slice(0, 5);
+    const top = shown.map((g) => `${g.count} from ${g.sender}${g.count > 2 && g.topic ? ` (mostly “${clip(g.topic, 40)}”)` : ''}`);
+    const rest = groups.slice(shown.length);
+    const others = rest.reduce((s, g) => s + g.count, 0);
+    parts.push(`Notifications: ${listJoin(others ? [...top, `${others} from ${rest.length} other senders`] : top)}.`);
   }
   return { summary: parts.join(' '), do_first: first, counts };
 }
