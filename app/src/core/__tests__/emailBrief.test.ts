@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { doFirst, emailLink, isAutomated, notificationGroups, oneLine, rulesBriefing, senderLabel, subjectKey, type BriefMessage } from '../emailBrief';
+import { briefingParts, doFirst, emailLink, isAutomated, notificationGroups, oneLine, plainBriefing, rulesBriefing, senderLabel, subjectKey, type BriefMessage } from '../emailBrief';
 
 const now = new Date('2026-10-26T15:00:00');
 const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
@@ -52,13 +52,24 @@ describe('email briefing rules', () => {
     expect(oneLine(inbox()[0])).toBe('Dana: Can you send the signed cover page before Thursday?');
   });
 
-  it('writes a short, readable summary paragraph', () => {
-    const b = rulesBriefing(inbox(), [], now);
+  it('writes a short, readable summary with each email marked as a reference', () => {
+    const list = inbox();
+    const b = rulesBriefing(list, [], now);
+    const id = (who: string) => list.find((m) => m.from_name?.startsWith(who))!.id;
     expect(b.summary).toBe(
-      '3 emails need you. Start with Dana: Can you send the signed cover page before Thursday? Then Maya and Acme Insurance. '
-      + 'One other email from Sam, nothing urgent. Notifications: 5 from GitHub (mostly “Run failed: Test & deploy - main”) and 1 from The Weekly Bloom.',
+      `3 emails need you. Start with [[email:${id('Dana')}|Dana · Document review]] — Can you send the signed cover page before Thursday? `
+      + `Then [[email:${id('Maya')}|Maya · Saturday?]] and [[email:${id('Acme')}|Acme Insurance · Your policy renews November 1]]. `
+      + `Nothing urgent from people: [[email:${id('Sam')}|Sam · Photos from the shoot]]. `
+      + 'Notifications: 5 from GitHub (mostly “Run failed: Test & deploy - main”) and 1 from The Weekly Bloom.',
     );
     expect(b.summary).not.toMatch(/Repository:|Duration:/);
+  });
+
+  it('splits a summary into text and email references', () => {
+    expect(briefingParts('Start with [[email:abc-1|Dana · Review]] — please reply. Also [[email:def]].')).toEqual([
+      { text: 'Start with ' }, { email: 'abc-1', label: 'Dana · Review' }, { text: ' — please reply. Also ' }, { email: 'def', label: null }, { text: '.' },
+    ]);
+    expect(plainBriefing('Start with [[email:abc-1|Dana · Review]].')).toBe('Start with “Dana · Review”.');
   });
 
   it('links each email to its own mail app', () => {

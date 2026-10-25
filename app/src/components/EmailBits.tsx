@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, Pressable, Text, View } from 'react-native';
 import type { EmailCategory } from '../core/ai-contracts';
 import { friendlyDate, timeOfDay, toISODate } from '../core/dates';
-import { doFirst, emailLink, oneLine, rulesBriefing } from '../core/emailBrief';
+import { briefingParts, doFirst, emailLink, oneLine, rulesBriefing, senderLabel } from '../core/emailBrief';
 import { useStore, type EmailDigest, type EmailMessage } from '../lib/store';
 import { colors, fonts, radius, shadow } from '../theme';
 import { Body, Icon, Muted, type IconName } from './ui';
@@ -98,7 +98,30 @@ export function useInboxBriefing() {
 }
 
 /** The Inbox summary: one short paragraph. The emails themselves are in the "Do first" tab below it. */
-export function InboxBriefing() {
+/**
+ * Summary text with each referenced email drawn as a chip ("✉ Dana · Document review") that opens it, so emails and
+ * plain words never blur together. A reference to an email that's gone (archived) shows muted.
+ */
+export function BriefingText({ summary, onOpen }: { summary: string; onOpen?: (messageId: string) => void }) {
+  const store = useStore();
+  return (
+    <Text style={{ fontFamily: fonts.body, fontSize: 15, color: colors.text, lineHeight: 26, marginTop: 8 }}>
+      {briefingParts(summary).map((part, i) => {
+        if ('text' in part) return <Text key={i}>{part.text}</Text>;
+        const m = store.emailMessages.find((x) => x.id === part.email);
+        const label = part.label ?? (m ? `${senderLabel(m)} · ${m.subject ?? 'no subject'}` : 'an email');
+        return (
+          <Text key={i} onPress={m && onOpen ? () => onOpen(m.id) : undefined} accessibilityRole={m ? 'link' : undefined}
+            style={{ fontFamily: fonts.medium, color: m ? colors.pinkDeep : colors.textMuted, backgroundColor: m ? colors.pinkWash : colors.track }}>
+            {` ✉ ${label} `}
+          </Text>
+        );
+      })}
+    </Text>
+  );
+}
+
+export function InboxBriefing({ onOpen }: { onOpen?: (messageId: string) => void }) {
   const b = useInboxBriefing();
   return (
     <View style={[{ backgroundColor: colors.card, borderRadius: radius.lg, padding: 16, borderWidth: 1, borderColor: colors.border, marginTop: 8 }, shadow]}>
@@ -107,7 +130,7 @@ export function InboxBriefing() {
         <Text style={{ fontFamily: fonts.semibold, color: colors.pinkDeep, fontSize: 13 }}>Inbox briefing</Text>
         <Muted style={{ marginLeft: 'auto', fontSize: 12 }}>{b.who} · {b.when}</Muted>
       </View>
-      <Body style={{ marginTop: 8, lineHeight: 22 }}>{b.summary}</Body>
+      <BriefingText summary={b.summary} onOpen={onOpen} />
       {b.newer > 0 && <Muted style={{ marginTop: 6, color: '#B7862A' }}>{b.newer} more arrived since this briefing.</Muted>}
       {!b.saved && <Muted style={{ marginTop: 10, fontSize: 12 }}>Want a smarter read? Ask your AI chat: “Check my Momentum inbox and tell me what to answer first.” Its briefing will show here.</Muted>}
     </View>

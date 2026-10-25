@@ -8,7 +8,7 @@ import { handoffToDrafts, draftsToCommit, HandoffItem, type HandoffInterpretatio
 import { recommend, KIND_LABEL } from '../../app/src/core/recommend';
 import type { Action, Goal, LifeArea } from '../../app/src/core/types';
 import { crunch, projectHealth, staleTasks } from '../../app/src/core/workload';
-import { emailLink, oneLine, scoreEmail, type BriefAccount, type BriefMessage } from '../../app/src/core/emailBrief';
+import { emailLink, emailRef, oneLine, scoreEmail, type BriefAccount, type BriefMessage } from '../../app/src/core/emailBrief';
 import { BriefingInput, modifyMessages, personToday, saveChatBriefing, threadTextFor } from './email/service';
 import type { Env } from './env';
 import { commitCapture, must, type Ctx } from './ops';
@@ -161,7 +161,7 @@ const TOOLS = [
   {
     name: 'save_email_briefing',
     title: 'Save the inbox briefing',
-    description: 'Saves your briefing into Momentum, where it shows at the top of their Inbox and on Today: a cohesive summary written to them (a short paragraph, not a list: what needs them, most urgent first, who they are waiting on, what can wait), and the emails to do first in order, each with a one-line reason. Optionally a better one-line summary per email. Replaces today\'s earlier briefing.',
+    description: 'Saves your briefing into Momentum, where it shows at the top of their Inbox and on Today: a cohesive summary written to them (a short paragraph, not a list: what needs them, most urgent first, who they are waiting on, what can wait), and the emails to do first in order, each with a one-line reason. Optionally a better one-line summary per email. Replaces today\'s earlier briefing. In the summary, mention each email by pasting its `ref` from get_inbox (e.g. [[email:<id>|Dana · Document review]]): the app shows it as a tappable chip, so the person can tell emails apart from your words. Never write raw ids or addresses in the text.',
     inputSchema: { type: 'object', required: ['summary', 'do_first'], properties: {
       summary: { type: 'string', maxLength: 1500 },
       do_first: { type: 'array', maxItems: 10, items: { type: 'object', required: ['message_id', 'why'], properties: { message_id: { type: 'string' }, why: { type: 'string', maxLength: 200 } } } },
@@ -408,7 +408,7 @@ async function inbox(ctx: Ctx, input: z.infer<typeof InboxInput>) {
       const s = scoreEmail(m, projects as { id: string; title: string }[]);
       const account = accts.find((a) => a.id === m.account_id);
       return {
-        id: m.id, inbox: account?.email_address, from: [m.from_name, m.from_address].filter(Boolean).join(' '), subject: m.subject,
+        id: m.id, ref: emailRef(m), inbox: account?.email_address, from: [m.from_name, m.from_address].filter(Boolean).join(' '), subject: m.subject,
         preview: (m.snippet ?? '').slice(0, 400), gist: oneLine(m), received: m.received_at, unread: m.is_unread, category: m.category,
         rules_priority: s.score, rules_why: s.why || null, open_link: emailLink(m, account)?.url ?? null,
       };

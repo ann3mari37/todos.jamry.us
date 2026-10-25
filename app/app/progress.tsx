@@ -1,11 +1,11 @@
 import { router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
-import { Banner, Body, Button, Card, H1, H2, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented } from '../../src/components/ui';
-import { shortDate, startOfWeek, toISODate } from '../../src/core/dates';
-import { api, friendlyAiError } from '../../src/lib/api';
-import { useStore } from '../../src/lib/store';
-import { colors, fonts, radius } from '../../src/theme';
+import { Banner, Body, Button, Card, H1, H2, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented } from '../src/components/ui';
+import { shortDate, startOfWeek, toISODate } from '../src/core/dates';
+import { api, friendlyAiError } from '../src/lib/api';
+import { useStore } from '../src/lib/store';
+import { colors, fonts, radius } from '../src/theme';
 
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const DAY = 86_400_000;
@@ -38,6 +38,7 @@ export default function Progress() {
   return (
     <Screen>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+        <IconButton name="arrow-left" label="Back" onPress={() => (router.canGoBack() ? router.back() : router.navigate('/more'))} />
         <H1 style={{ flex: 1 }}>{offset === 0 ? 'This Week' : offset === 1 ? 'Last Week' : `Week of ${shortDate(toISODate(ws))}`}</H1>
         <IconButton name="chevron-left" label="Previous week" onPress={() => setOffset(offset + 1)} />
         <IconButton name="chevron-right" label="Next week" onPress={() => setOffset(Math.max(0, offset - 1))} color={offset === 0 ? colors.textFaint : colors.text} />

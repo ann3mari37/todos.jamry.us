@@ -2,14 +2,14 @@ import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Banner, Body, Button, Card, Chip, Field, H1, Icon, IconButton, Muted, Segmented, Sheet, SheetOption } from '../src/components/ui';
-import type { CommitItem, EmailStep } from '../src/core/ai-contracts';
-import { friendlyDate, startOfDay, timeOfDay } from '../src/core/dates';
-import { friendlyAiError } from '../src/lib/api';
-import { useStore, uuid, type EmailMessage } from '../src/lib/store';
-import { CATEGORY_META, InboxBriefing, OpenInMail, useInboxBriefing } from '../src/components/EmailBits';
-import { isAutomated, notificationGroups, senderLabel, type NotificationGroup } from '../src/core/emailBrief';
-import { colors, fonts, radius } from '../src/theme';
+import { Banner, Body, Button, Card, Chip, Field, H1, Icon, IconButton, Muted, Segmented, Sheet, SheetOption } from '../../src/components/ui';
+import type { CommitItem, EmailStep } from '../../src/core/ai-contracts';
+import { friendlyDate, startOfDay, timeOfDay } from '../../src/core/dates';
+import { friendlyAiError } from '../../src/lib/api';
+import { useStore, uuid, type EmailMessage } from '../../src/lib/store';
+import { CATEGORY_META, InboxBriefing, OpenInMail, useInboxBriefing } from '../../src/components/EmailBits';
+import { isAutomated, notificationGroups, senderLabel, type NotificationGroup } from '../../src/core/emailBrief';
+import { colors, fonts, radius } from '../../src/theme';
 
 type Tab = 'first' | 'waiting' | 'rest';
 
@@ -58,7 +58,6 @@ export default function Inbox() {
       <ScrollView refreshControl={<RefreshControl refreshing={syncing} onRefresh={() => sync(true)} tintColor={colors.pink} />} contentContainerStyle={{ flexGrow: 1 }}>
         <View style={{ width: '100%', maxWidth: 560, alignSelf: 'center', paddingHorizontal: 18, paddingBottom: 32 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-            <IconButton name="chevron-left" label="Back" onPress={() => (router.canGoBack() ? router.back() : router.navigate('/today'))} />
             <H1 style={{ flex: 1 }}>Inbox</H1>
             {syncing ? <ActivityIndicator color={colors.pink} style={{ width: 44 }} /> : <IconButton name="refresh-cw" label="Sync email" onPress={() => sync(true)} size={20} />}
             <IconButton name="settings" label="Email accounts" onPress={() => router.push('/email-accounts')} size={20} />
@@ -88,7 +87,7 @@ export default function Inbox() {
               )}
               {note && <Banner tone="soft" text={note} />}
 
-              <InboxBriefing />
+              <InboxBriefing onOpen={(id) => { const m = store.emailMessages.find((x) => x.id === id); if (m) setOpen(m); }} />
 
               <Segmented
                 value={tab}

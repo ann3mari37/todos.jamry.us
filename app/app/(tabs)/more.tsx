@@ -26,12 +26,12 @@ export default function More() {
         <Divider />
         {email && (
           <>
-            <Row icon="mail" iconColor={colors.pink} title="Inbox" subtitle="Digest, summaries and email tasks" onPress={() => router.push('/inbox')} />
-            <Divider />
             <Row icon="at-sign" iconColor={colors.pink} title="Email Accounts" subtitle={store.emailAccounts.length ? `${store.emailAccounts.length} connected` : 'Connect your inbox'} onPress={() => router.push('/email-accounts')} />
             <Divider />
           </>
         )}
+        <Row icon="bar-chart-2" iconColor={colors.pink} title="Progress" subtitle="Your week, wins and milestones" onPress={() => router.push('/progress')} />
+        <Divider />
         <Row icon="grid" iconColor={colors.pink} title="Life Areas" subtitle="Home, Work, Health…" onPress={() => router.push('/life-areas')} />
         <Divider />
         <Row icon="clock" iconColor={colors.pink} title="History" subtitle="Everything you've done" onPress={() => router.push('/history')} />

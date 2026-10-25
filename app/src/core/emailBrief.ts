@@ -246,6 +246,42 @@ const listJoin = (xs: string[]) => (xs.length <= 1 ? xs.join('') : xs.length ===
  * A short paragraph: what needs you (most urgent first), who you're waiting on, other mail from people, then the
  * notifications by service ("18 from GitHub, mostly “Run failed: Test & deploy”") and what can wait.
  */
+// ───────────────────────── Email references in summaries
+// A summary mentions an email as [[email:<id>|<label>]]. The app draws it as a chip ("✉ Dana · Document review") that
+// opens the email, so it's always clear which parts are emails and which are just text. AI-written briefings use the
+// same form.
+
+export const EMAIL_REF = /\[\[email:([0-9a-zA-Z-]+)(?:\|([^\]|]{1,80}))?\]\]/g;
+
+/** "[[email:<id>|Dana · Document review]]" for one email. */
+export function emailRef(m: BriefMessage): string {
+  // Subject without reply prefixes or [tags]; numbers stay ("renews November 1").
+  const subject = (m.subject ?? '').replace(/^((re|fwd?|aw)\s*:\s*)+/i, '').replace(/\[[^\]]*\]\s*/g, '').trim();
+  const topic = clip(subject || 'no subject', 32);
+  const label = `${senderLabel(m)} · ${topic}`.replace(/[|[\]]/g, ' ').slice(0, 80);
+  return `[[email:${m.id}|${label}]]`;
+}
+
+export type BriefingPart = { text: string } | { email: string; label: string | null };
+
+/** Splits a summary into plain text and email references, in order. */
+export function briefingParts(summary: string): BriefingPart[] {
+  const out: BriefingPart[] = [];
+  let last = 0;
+  for (const m of summary.matchAll(EMAIL_REF)) {
+    if (m.index! > last) out.push({ text: summary.slice(last, m.index) });
+    out.push({ email: m[1], label: m[2] ?? null });
+    last = m.index! + m[0].length;
+  }
+  if (last < summary.length) out.push({ text: summary.slice(last) });
+  return out;
+}
+
+/** The summary as plain text ("Dana · Document review" in place of each reference), for places that can't show chips. */
+export function plainBriefing(summary: string): string {
+  return summary.replace(EMAIL_REF, (_, _id, label) => (label ? `“${label}”` : 'an email'));
+}
+
 export function rulesBriefing(msgs: BriefMessage[], projects: { id: string; title: string }[] = [], now: Date = new Date()): Briefing {
   const live = msgs.filter((m) => !m.is_archived && m.status !== 'dismissed');
   const counts: Record<string, number> = { total: live.length };
@@ -257,18 +293,19 @@ export function rulesBriefing(msgs: BriefMessage[], projects: { id: string; titl
   const parts: string[] = [];
   if (first.length) {
     const [top, ...rest] = first.map((f) => byId.get(f.message_id)!);
-    parts.push(`${first.length === 1 ? 'One email needs you' : `${first.length} emails need you`}. Start with ${end(oneLine(top))}`);
-    if (rest.length) parts.push(`Then ${listJoin(rest.slice(0, 3).map((m) => senderLabel(m)))}.`);
+    // The email itself is a reference (shown as a chip); what it asks follows as plain text.
+    const ask = isAutomated(top) && !top.summary ? '' : ` — ${end(gistOf(top))}`;
+    parts.push(`${first.length === 1 ? 'One email needs you' : `${first.length} emails need you`}. Start with ${emailRef(top)}${ask || '.'}`);
+    if (rest.length) parts.push(`Then ${listJoin(rest.slice(0, 3).map(emailRef))}.`);
   } else {
     parts.push('Nothing in your inbox needs a reply right now.');
   }
   const firstIds = new Set(first.map((f) => f.message_id));
   const waiting = live.filter((m) => m.category === 'waiting_on' && !firstIds.has(m.id));
-  if (waiting.length) parts.push(`You’re waiting to hear back from ${listJoin([...new Set(waiting.map(senderLabel))].slice(0, 3))}.`);
+  if (waiting.length) parts.push(`You’re waiting to hear back on ${listJoin(waiting.slice(0, 3).map(emailRef))}${waiting.length > 3 ? ` and ${waiting.length - 3} more` : ''}.`);
   const people = live.filter((m) => !isAutomated(m) && !firstIds.has(m.id) && m.category !== 'waiting_on');
   if (people.length) {
-    const names = [...new Set(people.map(senderLabel))];
-    parts.push(`${people.length === 1 ? 'One other email' : `${people.length} other emails`} from ${listJoin(names.slice(0, 3))}${names.length > 3 ? ' and others' : ''}, nothing urgent.`);
+    parts.push(`Nothing urgent from people: ${listJoin(people.slice(0, 3).map(emailRef))}${people.length > 3 ? ` and ${people.length - 3} more` : ''}.`);
   }
   const groups = notificationGroups(live.filter((m) => !firstIds.has(m.id) && m.category !== 'waiting_on'));
   if (groups.length) {
