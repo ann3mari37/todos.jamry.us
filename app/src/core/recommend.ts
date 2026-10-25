@@ -64,13 +64,7 @@ export function readyActions(input: RecommendInput): Action[] {
   const deps = input.dependencies ?? [];
   const exclude = new Set(input.excludeActionIds ?? []);
 
-  // Actions recently marked unsuitable are rested for a week.
-  const rested = new Set(
-    (input.feedback ?? [])
-      .filter((f) => f.action_id && (f.response === 'not_suitable' || f.response === 'dismissed'))
-      .filter((f) => (daysSince(f.created_at, now) ?? 99) < 7)
-      .map((f) => f.action_id as string),
-  );
+  const rested = restedActions(input, now);
 
   return input.actions.filter((a) => {
     if (!ACTIONABLE.includes(a.status)) return false;
@@ -88,6 +82,20 @@ export function readyActions(input: RecommendInput): Action[] {
 function minutes(a: Action): number {
   // Unestimated tasks get a guess from their wording, so quick ones ("Call…", "Reply…") can still be suggested.
   return a.estimated_minutes ?? estimateMinutes(a.title) ?? 20;
+}
+
+function actionDueDays(a: Action, now: Date): number | null {
+  return a.due_date && a.deadline_type !== 'none' ? daysUntil(a.due_date, now) : null;
+}
+
+/** Actions the user marked "not a good fit" or dismissed in the last 7 days rest for a week. */
+function restedActions(input: RecommendInput, now: Date): Set<string> {
+  return new Set(
+    (input.feedback ?? [])
+      .filter((f) => f.action_id && (f.response === 'not_suitable' || f.response === 'dismissed'))
+      .filter((f) => (daysSince(f.created_at, now) ?? 99) < 7)
+      .map((f) => f.action_id as string),
+  );
 }
 
 function deadlineDays(g: Goal | null | undefined, now: Date): number | null {
@@ -115,6 +123,7 @@ export function recommend(input: RecommendInput): Recommendation[] {
   const out: Recommendation[] = [];
 
   const goalOf = (a: Action) => (a.goal_id ? goalById.get(a.goal_id) ?? null : null);
+  const areaOf = (a: Action | null) => (a ? a.life_area_id ?? goalOf(a)?.life_area_id ?? null : null);
   const skipPenalty = (a: Action) => Math.min(a.times_skipped, 5) * 3;
   // First ready step of a goal (by sort order), so goals advance in order.
   const firstStep = (goalId: string) =>
@@ -128,78 +137,126 @@ export function recommend(input: RecommendInput): Recommendation[] {
     out.push({ kind, goal, action, reason, score });
   };
 
-  // ── Time-Sensitive: real deadlines only.
-  const timeSensitive = input.goals
-    .filter((g) => goalIsEligible(g, now, input.includePaused) && isTimeSensitive(g, now))
-    .map((g) => ({ g, d: deadlineDays(g, now)!, a: firstStep(g.id) }))
-    .filter((x) => x.a)
-    .sort((x, y) => (x.g.deadline_type === 'hard' ? 0 : 1) - (y.g.deadline_type === 'hard' ? 0 : 1) || x.d - y.d);
-  const ts = timeSensitive[0];
+  // ── Time-Sensitive: real dates only — task due dates and project deadlines. Overdue first, then hard, then soonest.
+  //    Window: hard dates within 14 days (project) / 7 days (task); target dates within 5 / 3 days; overdue up to 30 days.
+  const dated: { g: Goal | null; a: Action; d: number; hard: boolean; label: string; date: string; left: number | null }[] = [];
+  for (const a of ready) {
+    const d = actionDueDays(a, now);
+    if (d === null) continue;
+    const hard = a.deadline_type === 'hard';
+    if (d < -30 || d > (hard ? 7 : 3)) continue;
+    dated.push({ g: goalOf(a), a, d, hard, label: a.title, date: a.due_date!, left: null });
+  }
+  for (const g of input.goals) {
+    if (!goalIsEligible(g, now, input.includePaused) || !isTimeSensitive(g, now)) continue;
+    const a = firstStep(g.id);
+    if (a && !dated.some((x) => x.a.id === a.id)) {
+      dated.push({ g, a, d: deadlineDays(g, now)!, hard: g.deadline_type === 'hard', label: g.title, date: g.deadline!, left: remainingSteps(g.id, input.actions) });
+    }
+  }
+  const ts = dated.sort((x, y) => (x.d < 0 ? 0 : 1) - (y.d < 0 ? 0 : 1) || (x.hard ? 0 : 1) - (y.hard ? 0 : 1) || x.d - y.d)[0];
   if (ts) {
-    const left = remainingSteps(ts.g.id, input.actions);
-    const when = ts.d < 0 ? `was due ${friendlyDate(ts.g.deadline!, now)}` : `is due ${friendlyDate(ts.g.deadline!, now)}`;
-    const kindWord = ts.g.deadline_type === 'hard' ? '' : ' (target date)';
-    take(
-      'time_sensitive',
-      ts.g,
-      ts.a,
-      `${ts.g.title} ${when}${kindWord}. ${left} step${left === 1 ? '' : 's'} left.`,
-      100 - ts.d,
-    );
+    const when = ts.d < 0 ? `was due ${friendlyDate(ts.date, now)}` : ts.d === 0 ? 'is due today' : `is due ${friendlyDate(ts.date, now)}`;
+    const kindWord = ts.hard ? '' : ' (target date)';
+    const steps = ts.left !== null ? ` ${ts.left} step${ts.left === 1 ? '' : 's'} left.` : minutes(ts.a) <= 15 ? ` About ${minutes(ts.a)} min.` : '';
+    take('time_sensitive', ts.g, ts.a, `${ts.label} ${when}${kindWord}.${steps}`, 100 - ts.d);
   }
 
-  // ── Meaningful Move: something the user said matters.
-  const meaningfulCandidates = ready
-    .filter((a) => !usedActions.has(a.id))
+  // ── Meaningful Move: the project most worth a step today. Scored, highest wins:
+  //    user-stated meaning +15 (suggested meaning +8) · "keep visible"/"help me" +10 · "I tend to avoid this" +12
+  //    almost done (≥60% and ≤2 steps left) +12 · momentum (progress in the last 3 days) +6 · deadline 15–45 days out +6
+  //    days since progress (max +14) · startable steps preferred · skipped suggestions lose points.
+  const goalCandidates = ready
+    .filter((a) => !usedActions.has(a.id) && a.goal_id && !usedGoals.has(a.goal_id))
     .map((a) => ({ a, g: goalOf(a) }))
-    .filter((x): x is { a: Action; g: Goal } => !!x.g && isMeaningful(x.g) && !usedGoals.has(x.g.id))
+    .filter((x): x is { a: Action; g: Goal } => !!x.g && firstStep(x.g.id)?.id === x.a.id) // a project's next step, in order
     .map(({ a, g }) => {
+      const { done, total } = goalProgress(g.id, input.actions);
+      const left = total - done;
+      const sinceProgress = daysSince(g.last_meaningful_progress_at, now);
       const stale = daysSince(g.last_meaningful_progress_at ?? g.created_at, now) ?? 0;
-      let score = 50;
-      if (g.meaning_source === 'user') score += 15;
+      const due = deadlineDays(g, now);
+      const almostDone = total >= 2 && done / total >= 0.6 && left <= 2;
+      const momentum = sinceProgress !== null && sinceProgress <= 3;
+      const dueSoonish = due !== null && due > 14 && due <= 45;
+      let score = 30;
+      if (g.meaning?.trim()) score += g.meaning_source === 'user' ? 15 : 8;
       if (g.accountability === 'help_me' || g.accountability === 'keep_visible') score += 10;
+      if (g.accountability === 'i_avoid_this') score += 12;
+      if (almostDone) score += 12;
+      if (momentum) score += 6;
+      if (dueSoonish) score += 6;
       score += Math.min(stale, 14);
       score -= skipPenalty(a);
-      score -= Math.max(0, minutes(a) - 30) / 5; // prefer startable steps
-      return { a, g, score };
+      score -= Math.max(0, minutes(a) - 30) / 5;
+      let reason: string;
+      if (g.meaning?.trim()) reason = g.meaning.trim();
+      else if (g.accountability === 'i_avoid_this') reason = "A small step on something that's easy to put off.";
+      else if (almostDone) reason = `Only ${left} step${left === 1 ? '' : 's'} left on "${g.title}".`;
+      else if (dueSoonish) reason = `"${g.title}" is due in ${due} days. A step now keeps it calm.`;
+      else if (momentum) reason = `Keep the momentum going on "${g.title}".`;
+      else reason = `Moves "${g.title}" forward.`;
+      return { a, g, score, reason };
     })
     .sort((x, y) => y.score - x.score);
-  // Fall back to any goal-linked action so goals still move when no meaning was given.
-  const anyGoalCandidate = ready
-    .filter((a) => !usedActions.has(a.id) && a.goal_id && !usedGoals.has(a.goal_id))
-    .sort((x, y) => skipPenalty(x) - skipPenalty(y) || x.sort_order - y.sort_order)[0];
-  const mm = meaningfulCandidates[0] ?? (anyGoalCandidate ? { a: anyGoalCandidate, g: goalOf(anyGoalCandidate)!, score: 40 } : null);
-  if (mm) {
-    const why = mm.g.meaning?.trim();
-    take('meaningful_move', mm.g, mm.a, why ? why : `Moves "${mm.g.title}" forward.`, mm.score);
-  }
+  const mm = goalCandidates[0];
+  if (mm) take('meaningful_move', mm.g, mm.a, mm.reason, mm.score);
 
-  // ── Easy Momentum: a small, useful thing.
+  // ── Easy Momentum: one quick task (≤15 min; estimated from the wording when not set). Scored, highest wins:
+  //    on the list a while (+1/day, max 10) · not part of a project +5 · a life area the other picks don't cover +4
+  //    due within a week +3 · shorter is better · skipped suggestions lose points.
+  const usedAreas = new Set(out.map((r) => areaOf(r.action)).filter(Boolean));
   const easy = ready
     .filter((a) => !usedActions.has(a.id) && minutes(a) <= 15)
-    .sort((x, y) => {
-      // Prefer something from a different goal than what's already shown.
-      const xg = x.goal_id && usedGoals.has(x.goal_id) ? 1 : 0;
-      const yg = y.goal_id && usedGoals.has(y.goal_id) ? 1 : 0;
-      return xg - yg || minutes(x) - minutes(y) || skipPenalty(x) - skipPenalty(y);
-    })[0];
-  if (easy) take('easy_momentum', goalOf(easy), easy, 'A quick win to create space.', 30);
+    .map((a) => {
+      const age = daysSince(a.created_at, now) ?? 0;
+      const due = actionDueDays(a, now);
+      const area = areaOf(a);
+      const dueThisWeek = due !== null && due >= 0 && due <= 7;
+      let score = 30 + Math.min(age, 10) - minutes(a) / 5 - skipPenalty(a);
+      if (!a.goal_id) score += 5;
+      if (a.goal_id && usedGoals.has(a.goal_id)) score -= 8; // prefer something from elsewhere
+      if (area && !usedAreas.has(area)) score += 4;
+      if (dueThisWeek) score += 3;
+      const reason = dueThisWeek
+        ? `Due ${friendlyDate(a.due_date!, now)} and only takes about ${minutes(a)} min.`
+        : age >= 7 ? `On your list for ${age} days. About ${minutes(a)} min clears it.`
+        : 'A quick win to create space.';
+      return { a, score, reason };
+    })
+    .sort((x, y) => y.score - x.score)[0];
+  if (easy) take('easy_momentum', goalOf(easy.a), easy.a, easy.reason, easy.score);
 
-  // ── Quietly Waiting: meaningful goal that hasn't moved. Never framed as failure.
-  const waiting = input.goals
-    .filter(
-      (g) =>
-        g.status === 'active' &&
-        goalIsEligible(g, now) &&
-        !usedGoals.has(g.id) &&
-        g.accountability !== 'do_not_remind' &&
-        isMeaningful(g),
-    )
+  // ── Quietly Waiting: something that has gone quiet, offered gently (never as failure). First match wins:
+  //    1. a meaningful project idle ≥ inactivity days · 2. a task marked "waiting" for ≥ 5 days (time to follow up?)
+  //    3. any active project idle ≥ 2× inactivity days · 4. a standalone task on the list ≥ 21 days ("still want it?")
+  const quietGoal = (meaningfulOnly: boolean, minIdle: number) => input.goals
+    .filter((g) => g.status === 'active' && goalIsEligible(g, now) && !usedGoals.has(g.id) && g.accountability !== 'do_not_remind'
+      && (!meaningfulOnly || isMeaningful(g)))
     .map((g) => ({ g, idle: daysSince(g.last_meaningful_progress_at ?? g.created_at, now) ?? 0 }))
-    .filter((x) => x.idle >= inactivity)
+    .filter((x) => x.idle >= minIdle)
     .sort((x, y) => y.idle - x.idle)[0];
-  if (waiting) {
-    take('quietly_waiting', waiting.g, firstStep(waiting.g.id), "Hasn't made progress recently.", 20);
+  const resting = restedActions(input, now);
+  const followUp = input.actions
+    .filter((a) => a.status === 'waiting' && !usedActions.has(a.id) && !resting.has(a.id))
+    .map((a) => ({ a, days: daysSince(a.created_at, now) ?? 0 }))
+    .filter((x) => x.days >= 5)
+    .sort((x, y) => y.days - x.days)[0];
+  const oldTask = ready
+    .filter((a) => !a.goal_id && !usedActions.has(a.id))
+    .map((a) => ({ a, days: daysSince(a.created_at, now) ?? 0 }))
+    .filter((x) => x.days >= 21)
+    .sort((x, y) => y.days - x.days)[0];
+  const meaningfulQuiet = quietGoal(true, inactivity);
+  const anyQuiet = quietGoal(false, inactivity * 2);
+  if (meaningfulQuiet) {
+    take('quietly_waiting', meaningfulQuiet.g, firstStep(meaningfulQuiet.g.id), "Hasn't made progress recently.", 20);
+  } else if (followUp) {
+    take('quietly_waiting', goalOf(followUp.a), followUp.a, `You've been waiting on this for ${followUp.days} days. Time to follow up?`, 19);
+  } else if (anyQuiet && remainingSteps(anyQuiet.g.id, input.actions) > 0) {
+    take('quietly_waiting', anyQuiet.g, firstStep(anyQuiet.g.id), `No progress in ${anyQuiet.idle} days. One small step would wake it up.`, 18);
+  } else if (oldTask) {
+    take('quietly_waiting', null, oldTask.a, `On your list for ${oldTask.days} days. Still want it?`, 17);
   }
 
   // ── Mode shaping. Modes change emphasis, never add obligations.

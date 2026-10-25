@@ -16,7 +16,7 @@ export const demoSession = { user: { id: 'demo-user', email: 'you@example.com' }
 
 const area = (id: string, name: string, color: string, icon: string, sort_order: number): LifeArea => ({ id, name, color, icon, sort_order, archived_at: null });
 const AREAS = [
-  area('a-home', 'Home', '#F07A8C', 'home', 0), area('a-work', 'Work', '#3FA7A3', 'briefcase', 1), area('a-health', 'Health', '#7DB46C', 'leaf', 2),
+  area('a-home', 'Home', '#F07A8C', 'home', 0), { ...area('a-work', 'Work', '#3FA7A3', 'briefcase', 1), keywords: ['crm', 'client'] }, area('a-health', 'Health', '#7DB46C', 'leaf', 2),
   area('a-fin', 'Finances', '#F2B84B', 'wallet', 3), area('a-rel', 'Relationships', '#F59A6B', 'heart', 4), area('a-growth', 'Personal Growth', '#A98BDB', 'sparkle', 5),
   area('a-other', 'Other', '#9CA3AF', 'circle', 6),
 ];
@@ -50,8 +50,9 @@ const ACTIONS: Action[] = [
   act('Choose dates', 'g-trip', 'completed', 10), act('Look at flights', 'g-trip', 'ready', 20),
   // Loose tasks for the organizer to file:
   act('Clear the kitchen counter', null, 'ready', 5, { life_area_id: 'a-home' }),
-  act('Buy storage bins', null, 'ready', 15), act('Book dentist cleaning', null, 'ready', 10), act('Reply to Maya about Saturday', null, 'ready', 5),
+  act('Buy storage bins', null, 'ready', 15), act('Book dentist cleaning', null, 'ready', 10, { due_date: date(2), deadline_type: 'target' }), act('Reply to Maya about Saturday', null, 'ready', 5),
   act('Hang the hooks for bikes', null, 'ready', 20),
+  act('Hear back from the landlord', null, 'waiting', 5, { life_area_id: 'a-home', created_at: iso(-8 * D) }),
 ];
 
 const acc = (title: string, hoursAgo: number, goal_id: string | null, life_area_id: string | null): Accomplishment => ({

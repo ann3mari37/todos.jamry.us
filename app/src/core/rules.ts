@@ -111,9 +111,23 @@ const AREA_HINTS: Record<string, RegExp> = {
   'personal growth': /\b(learn|read|book|course|class|practice|journal|meditate|study|language|skill|guitar|piano|podcast)\b/i,
 };
 
-export type AreaLike = Pick<LifeArea, 'id' | 'name' | 'archived_at'>;
+export type AreaLike = Pick<LifeArea, 'id' | 'name' | 'archived_at'> & { keywords?: string[] | null };
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The user's own words for an area win over the built-in hints; then the area's own name counts as a keyword. */
+function userWordsMatch(text: string, a: AreaLike): boolean {
+  const words = [...(a.keywords ?? []), a.name].map((w) => w.trim()).filter((w) => w.length >= 2);
+  return words.some((w) => new RegExp(`\\b${escapeRe(w)}`, 'i').test(text));
+}
 
 export function guessLifeArea(text: string, areas: AreaLike[]): string | null {
+  const live = areas.filter((a) => !a.archived_at);
+  const custom = live.find((a) => (a.keywords?.length ?? 0) > 0 && userWordsMatch(text, a));
+  if (custom) return custom.id;
+  for (const a of live) {
+    if (!AREA_HINTS[a.name.trim().toLowerCase()] && userWordsMatch(text, a)) return a.id; // e.g. an area called "Church"
+  }
   for (const a of areas) {
     if (a.archived_at) continue;
     const hint = AREA_HINTS[a.name.trim().toLowerCase()];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fallbackInterpret } from '../fallback-capture';
-import { estimateMinutes, matchProject, parseDue, stripDue, triageEmail } from '../rules';
+import { estimateMinutes, guessLifeArea, matchProject, parseDue, stripDue, triageEmail } from '../rules';
 
 const NOW = new Date(2026, 9, 24, 10); // Saturday, Oct 24 2026
 const due = (t: string) => parseDue(t, NOW);
@@ -87,5 +87,19 @@ describe('triageEmail', () => {
   it('summarizes with the first sentence of the preview', () => {
     expect(triageEmail(mail('Priya', 'priya@work.com', 'Agenda', 'Here is the draft agenda for next week. More details inside the doc.')).summary)
       .toBe('Here is the draft agenda for next week.');
+  });
+});
+
+describe('custom area keywords', () => {
+  it('files by your own keywords first, and by custom area names', () => {
+    const custom = [
+      { id: 'home', name: 'Home', archived_at: null },
+      { id: 'work', name: 'Work', archived_at: null, keywords: ['crm', 'Malinda'] },
+      { id: 'church', name: 'Church', archived_at: null },
+    ];
+    expect(guessLifeArea('Update my CRM', custom)).toBe('work');
+    expect(guessLifeArea('Create a project management app for MaLInda', custom)).toBe('work');
+    expect(guessLifeArea('Bring snacks to church', custom)).toBe('church');
+    expect(guessLifeArea('Clean the garage', custom)).toBe('home');
   });
 });

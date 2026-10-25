@@ -280,7 +280,7 @@ function AreasTab() {
         const acts = store.actions.filter((a) => (a.life_area_id ?? store.goals.find((g) => g.id === a.goal_id)?.life_area_id) === area.id && a.status !== 'dismissed' && a.status !== 'suggested');
         const week = store.accomplishments.filter((a) => a.life_area_id === area.id && new Date(a.occurred_at).getTime() >= ws).length;
         return (
-          <Card key={area.id} onPress={() => router.push('/life-areas')}>
+          <Card key={area.id} onPress={() => router.push({ pathname: '/area/[id]', params: { id: area.id } })}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: area.color }} />
               <Body style={{ flex: 1, fontFamily: fonts.medium }}>{area.name}</Body>

@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, View } from 'react-native';
 import { OrganizeSheet } from '../src/components/OrganizeSheet';
 import { Banner, Button, Card, Divider, Field, H1, IconButton, Muted, Row, Screen, Sheet } from '../src/components/ui';
@@ -9,7 +9,15 @@ import { AREA_COLORS, colors } from '../src/theme';
 
 export default function LifeAreas() {
   const store = useStore();
-  const [edit, setEdit] = useState<Partial<LifeArea> | null>(null);
+  const params = useLocalSearchParams<{ edit?: string }>();
+  const [edit, setEdit] = useState<(Partial<LifeArea> & { kw?: string }) | null>(null);
+  const startEdit = (a: Partial<LifeArea>) => setEdit({ ...a, kw: (a.keywords ?? []).join(', ') });
+  // Opened from an area screen's pencil: go straight to that area's settings.
+  useEffect(() => {
+    const a = params.edit ? store.lifeAreas.find((x) => x.id === params.edit) : null;
+    if (a) startEdit(a);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.edit, store.lifeAreas.length]);
   const [organizing, setOrganizing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const OPEN = ['ready', 'in_progress', 'waiting', 'blocked'];
@@ -35,7 +43,7 @@ export default function LifeAreas() {
         <IconButton name="chevron-left" label="Back" onPress={() => (router.canGoBack() ? router.back() : router.navigate('/more'))} />
         <H1 style={{ flex: 1 }}>Life Areas</H1>
         <IconButton name="star" label="Organize" color={colors.pink} onPress={() => setOrganizing(true)} />
-        <IconButton name="plus" label="Add life area" onPress={() => setEdit({ name: '', color: AREA_COLORS[active.length % AREA_COLORS.length], icon: 'circle' })} />
+        <IconButton name="plus" label="Add life area" onPress={() => startEdit({ name: '', color: AREA_COLORS[active.length % AREA_COLORS.length], icon: 'circle' })} />
       </View>
       <Muted style={{ marginBottom: 12 }}>Ways to group your life — never quotas.</Muted>
       {note && <Banner text={note} />}
@@ -47,7 +55,7 @@ export default function LifeAreas() {
         {active.map((a, i) => (
           <View key={a.id}>
             {i > 0 && <Divider />}
-            <Row title={a.name} subtitle={counts(a.id)} leading={<View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: `${a.color}33`, alignItems: 'center', justifyContent: 'center' }}><View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: a.color }} /></View>} onPress={() => setEdit(a)} />
+            <Row title={a.name} subtitle={counts(a.id)} leading={<View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: `${a.color}33`, alignItems: 'center', justifyContent: 'center' }}><View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: a.color }} /></View>} onPress={() => router.push({ pathname: '/area/[id]', params: { id: a.id } })} />
           </View>
         ))}
       </Card>
@@ -55,7 +63,7 @@ export default function LifeAreas() {
         <>
           <Muted style={{ marginTop: 12, marginBottom: 6 }}>Archived</Muted>
           <Card style={{ paddingVertical: 4 }}>
-            {archived.map((a) => <Row key={a.id} title={a.name} onPress={() => setEdit(a)} />)}
+            {archived.map((a) => <Row key={a.id} title={a.name} onPress={() => startEdit(a)} />)}
           </Card>
         </>
       )}
@@ -71,7 +79,20 @@ export default function LifeAreas() {
                   style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c, borderWidth: 3, borderColor: edit.color === c ? colors.text : 'transparent' }} />
               ))}
             </View>
-            <Button title="Save" disabled={!edit.name?.trim()} onPress={async () => { await store.upsertLifeArea({ ...edit, name: edit.name!.trim() } as LifeArea); setEdit(null); }} />
+            <Field
+              label="Keywords (optional)"
+              value={edit.kw ?? ''}
+              onChangeText={(kw) => setEdit({ ...edit, kw })}
+              placeholder="e.g. crm, client, Malinda"
+              autoCapitalize="none"
+            />
+            <Muted style={{ marginTop: -6, marginBottom: 14 }}>New tasks that mention any of these words are filed in this area automatically. Separate words with commas.</Muted>
+            <Button title="Save" disabled={!edit.name?.trim()} onPress={async () => {
+              const { kw, ...rest } = edit;
+              const keywords = [...new Set((kw ?? '').split(',').map((w) => w.trim()).filter(Boolean))].slice(0, 30);
+              await store.upsertLifeArea({ ...rest, name: edit.name!.trim(), keywords } as LifeArea);
+              setEdit(null);
+            }} />
             {edit.id && (
               <>
                 <Button variant="ghost" title={edit.archived_at ? 'Restore' : 'Archive'} onPress={async () => { await store.upsertLifeArea({ id: edit.id, name: edit.name!, archived_at: edit.archived_at ? null : new Date().toISOString() }); setEdit(null); }} />

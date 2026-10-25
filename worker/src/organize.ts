@@ -28,7 +28,7 @@ export interface OrganizePlan {
   source?: 'ai' | 'rules';
 }
 
-type Context = { areas: { id: string; name: string }[]; goals: Row[]; actions: Row[]; goalsToFile: Row[] };
+type Context = { areas: { id: string; name: string; keywords?: string[] | null }[]; goals: Row[]; actions: Row[]; goalsToFile: Row[] };
 
 /**
  * Proposes where loose tasks and unfiled projects belong. Uses AI when `useAi` is true and it answers;
@@ -90,7 +90,7 @@ async function aiOrganize(ctx: Ctx, c: Context): Promise<OrganizeOutput> {
 
 async function loadContext(ctx: Ctx, input: z.infer<typeof OrganizePreviewInput>): Promise<Context | null> {
   const [areas, goals] = (await Promise.all([
-    must(ctx.db.from('life_areas').select('id,name').is('archived_at', null).order('sort_order')),
+    must(ctx.db.from('life_areas').select('id,name,keywords').is('archived_at', null).order('sort_order')),
     must(ctx.db.from('goals').select('id,title,life_area_id').in('status', ['active', 'waiting', 'blocked', 'paused']).limit(80)),
   ])) as [{ id: string; name: string }[], Row[]];
 

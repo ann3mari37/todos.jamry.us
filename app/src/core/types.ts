@@ -21,6 +21,8 @@ export interface LifeArea {
   icon: string;
   sort_order: number;
   archived_at: string | null;
+  /** Extra words that file tasks into this area automatically. */
+  keywords?: string[];
 }
 
 export interface Goal {
@@ -52,6 +54,9 @@ export interface Action {
   notes: string | null;
   completion_criteria: string | null;
   estimated_minutes: number | null;
+  /** A task's own due date (YYYY-MM-DD); projects carry theirs on the goal. */
+  due_date?: string | null;
+  deadline_type?: DeadlineType;
   status: ActionStatus;
   origin: 'user' | 'ai';
   requires_clarification: boolean;
