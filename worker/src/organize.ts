@@ -1,9 +1,10 @@
-// AI organization: file loose tasks into projects (goals) and every item into a life area.
-// The model only proposes; business rules here decide what is kept, and the database applies it
+// Organization: file loose tasks into projects (goals) and every item into a life area.
+// AI proposes when available, keyword rules otherwise; business rules here decide what is kept, and the database applies it
 // atomically with an undo record (apply_organization / undo_organization).
 
 import { z } from 'zod';
 import { ApplyOrganizeInput, OrganizeOutput, type OrganizeAssignment, type OrganizeProject } from '../../app/src/core/ai-contracts';
+import { guessLifeArea, matchProject } from '../../app/src/core/rules';
 import { callStructured } from './openai';
 import { keepId, must, norm, profile, type Ctx } from './ops';
 import { PROMPTS } from './prompts';
@@ -24,10 +25,70 @@ type Row = { id: string; title: string; goal_id?: string | null; life_area_id: s
 export interface OrganizePlan {
   new_projects: (OrganizeProject & { action_count: number })[];
   assignments: (OrganizeAssignment & { title: string; from_goal_id: string | null; from_area_id: string | null })[];
+  source?: 'ai' | 'rules';
 }
 
-export async function organizePreview(ctx: Ctx, input: z.infer<typeof OrganizePreviewInput>): Promise<OrganizePlan> {
+type Context = { areas: { id: string; name: string }[]; goals: Row[]; actions: Row[]; goalsToFile: Row[] };
+
+/**
+ * Proposes where loose tasks and unfiled projects belong. Uses AI when `useAi` is true and it answers;
+ * otherwise (no provider, AI off, over limits, provider errors) the keyword rules produce the plan.
+ */
+export async function organizePreview(ctx: Ctx, input: z.infer<typeof OrganizePreviewInput>, useAi: boolean): Promise<OrganizePlan> {
+  const c = await loadContext(ctx, input);
+  if (!c) return { new_projects: [], assignments: [], source: useAi ? 'ai' : 'rules' };
+  if (useAi) {
+    try {
+      return { ...refinePlan(await aiOrganize(ctx, c), c), source: 'ai' };
+    } catch (e) {
+      if (!(e instanceof HttpError)) throw e; // AI unavailable → rules below
+    }
+  }
+  return { ...refinePlan(rulesOrganize(c), c), source: 'rules' };
+}
+
+/** Keyword rules: join an existing project that shares a distinctive word, otherwise file into a life area. */
+export function rulesOrganize(c: Context): OrganizeOutput {
+  const assignments: OrganizeOutput['assignments'] = [];
+  for (const a of c.actions) {
+    const project = a.goal_id ? null : matchProject(a.title, c.goals);
+    if (project) {
+      assignments.push({ kind: 'action', id: a.id, goal_id: project.id, goal_ref: null, life_area_id: null, confidence: 0.8, reason: `Shares "${project.word}" with that project` });
+      continue;
+    }
+    const area = a.life_area_id || a.goal_id ? null : guessLifeArea(a.title, c.areas.map((x) => ({ ...x, archived_at: null })));
+    if (area) assignments.push({ kind: 'action', id: a.id, goal_id: null, goal_ref: null, life_area_id: area, confidence: 0.75, reason: 'Matched by keywords' });
+  }
+  for (const g of c.goalsToFile) {
+    const area = guessLifeArea(g.title, c.areas.map((x) => ({ ...x, archived_at: null })));
+    if (area) assignments.push({ kind: 'goal', id: g.id, goal_id: null, goal_ref: null, life_area_id: area, confidence: 0.75, reason: 'Matched by keywords' });
+  }
+  return { new_projects: [], assignments };
+}
+
+async function aiOrganize(ctx: Ctx, c: Context): Promise<OrganizeOutput> {
   await profile(ctx);
+  const areaName = new Map(c.areas.map((a) => [a.id, a.name]));
+  return callStructured(ctx.env, {
+    operation: 'organize',
+    promptVersion: PROMPTS.organize.version,
+    system: PROMPTS.organize.system,
+    user: {
+      life_areas: c.areas,
+      projects: c.goals.map((g) => ({ id: g.id, title: g.title, life_area: g.life_area_id ? areaName.get(g.life_area_id) ?? null : null })),
+      to_organize: {
+        actions: c.actions.map((a) => ({ id: a.id, title: a.title, goal_id: a.goal_id ?? null, life_area_id: a.life_area_id })),
+        goals: c.goalsToFile.map((g) => ({ id: g.id, title: g.title })),
+      },
+    },
+    jsonSchema: S.organizeSchema,
+    validator: OrganizeOutput,
+    maxOutputTokens: 4000,
+    userId: ctx.userId,
+  });
+}
+
+async function loadContext(ctx: Ctx, input: z.infer<typeof OrganizePreviewInput>): Promise<Context | null> {
   const [areas, goals] = (await Promise.all([
     must(ctx.db.from('life_areas').select('id,name').is('archived_at', null).order('sort_order')),
     must(ctx.db.from('goals').select('id,title,life_area_id').in('status', ['active', 'waiting', 'blocked', 'paused']).limit(80)),
@@ -45,28 +106,8 @@ export async function organizePreview(ctx: Ctx, input: z.infer<typeof OrganizePr
     goalsToFile = goals;
   }
   const actions = (await must(actionsQ)) as Row[];
-  if (!actions.length && !goalsToFile.length) return { new_projects: [], assignments: [] };
-
-  const areaName = new Map(areas.map((a) => [a.id, a.name]));
-  const out = await callStructured(ctx.env, {
-    operation: 'organize',
-    promptVersion: PROMPTS.organize.version,
-    system: PROMPTS.organize.system,
-    user: {
-      life_areas: areas,
-      projects: goals.map((g) => ({ id: g.id, title: g.title, life_area: g.life_area_id ? areaName.get(g.life_area_id) ?? null : null })),
-      to_organize: {
-        actions: actions.map((a) => ({ id: a.id, title: a.title, goal_id: a.goal_id ?? null, life_area_id: a.life_area_id })),
-        goals: goalsToFile.map((g) => ({ id: g.id, title: g.title })),
-      },
-    },
-    jsonSchema: S.organizeSchema,
-    validator: OrganizeOutput,
-    maxOutputTokens: 4000,
-    userId: ctx.userId,
-  });
-
-  return refinePlan(out, { areas, goals, actions, goalsToFile });
+  if (!actions.length && !goalsToFile.length) return null;
+  return { areas, goals, actions, goalsToFile };
 }
 
 /** Business rules applied to the model's proposal. Exported for tests. */
@@ -157,10 +198,10 @@ export function confidentSubset(plan: OrganizePlan, min = AUTO_APPLY_CONFIDENCE)
  * After a capture (or email) commit: file the new loose items automatically when the user has
  * auto-organize on. Never throws — a commit must not fail because organizing did.
  */
-export async function autoOrganize(ctx: Ctx, created: { kind: string; id: string }[], trigger: 'capture' | 'email') {
+export async function autoOrganize(ctx: Ctx, created: { kind: string; id: string }[], trigger: 'capture' | 'email', useAi: boolean) {
   try {
-    const prof = (await must(ctx.db.from('profiles').select('ai_enabled,auto_organize').single())) as { ai_enabled: boolean; auto_organize: boolean };
-    if (!prof.ai_enabled || !prof.auto_organize) return null;
+    const prof = (await must(ctx.db.from('profiles').select('auto_organize').single())) as { auto_organize: boolean };
+    if (!prof.auto_organize) return null;
     const action_ids = created.filter((c) => c.kind === 'action').map((c) => c.id);
     const goal_ids = created.filter((c) => c.kind === 'goal').map((c) => c.id);
     if (!action_ids.length && !goal_ids.length) return null;
@@ -170,7 +211,7 @@ export async function autoOrganize(ctx: Ctx, created: { kind: string; id: string
       goal_ids.length ? must(ctx.db.from('goals').select('id').in('id', goal_ids).is('life_area_id', null)) : [],
     ])) as [{ id: string }[], { id: string }[]];
     if (!loose.length && !unfiled.length) return null;
-    const plan = await organizePreview(ctx, { scope: 'loose', action_ids: loose.map((r) => r.id), goal_ids: unfiled.map((r) => r.id) });
+    const plan = await organizePreview(ctx, { scope: 'loose', action_ids: loose.map((r) => r.id), goal_ids: unfiled.map((r) => r.id) }, useAi);
     const subset = confidentSubset(plan);
     if (!subset) return null;
     return await organizeApply(ctx, { ...subset, trigger });

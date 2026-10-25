@@ -71,7 +71,7 @@ export default function Capture() {
       // AI unavailable → deterministic split. Nothing the user typed is lost.
       if (e instanceof ApiError && e.body?.capture_id) setCaptureId(String(e.body.capture_id));
       setNotice(friendlyAiError(e));
-      const local = mode === 'goal' ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw })] } : fallbackInterpret(raw, store.lifeAreas);
+      const local = mode === 'goal' ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw })] } : fallbackInterpret(raw, store.lifeAreas, store.goals.filter((g) => ['active', 'waiting', 'blocked'].includes(g.status)));
       setDrafts(local.items.map((i) => blank({ ...i, kind: mode === 'did' ? 'accomplishment' : i.kind, suggested_goal_id: params.goal ?? null, meaningful: !!params.goal })));
     } finally {
       setBusy(false);

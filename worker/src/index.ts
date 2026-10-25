@@ -53,12 +53,6 @@ const AI_ROUTES: Record<string, Handler> = {
   '/api/ai/classify-accomplishments': async (req, env, c) => ops.classifyAccomplishments({ env, ...c }, parse(ops.ClassifyInput, await readJson(req))),
   '/api/ai/blockers': async (req, env, c) => ops.identifyBlockers({ env, ...c }, parse(ops.BlockersInput, await readJson(req))),
   '/api/ai/weekly-summary': async (req, env, c) => ops.weeklySummary({ env, ...c }, parse(ops.SummaryInput, await readJson(req))),
-  '/api/ai/organize': async (req, env, c) => organize.organizePreview({ env, ...c }, parse(organize.OrganizePreviewInput, await readJson(req))),
-  '/api/ai/email-digest': async (req, env, c) => {
-    const input = parse(email.DigestInput, await readJson(req));
-    await ops.profile({ env, ...c });
-    return { digest: await email.buildDigest(env, c.db, c.userId, input) };
-  },
   '/api/ai/email-thread': async (req, env, c) => {
     const input = parse(email.ThreadInput, await readJson(req));
     await ops.profile({ env, ...c });
@@ -80,14 +74,16 @@ const DATA_ROUTES: Record<string, Handler> = {
     const ctx = { env, ...c };
     const result = (await ops.commitCapture(ctx, { ...parse(CommitCaptureInput, body), source })) as { items?: { kind: string; id: string }[] };
     // File new loose tasks into projects/areas when auto-organize is on. Never blocks or fails the commit.
-    let organized = null;
-    if (env.OPENAI_API_KEY && result.items?.length) {
-      try {
-        await enforceLimits(env, c.userId);
-        organized = await organize.autoOrganize(ctx, result.items, source === 'email' ? 'email' : 'capture');
-      } catch { /* over limit — skip */ }
-    }
+    // AI files them when available; keyword rules otherwise.
+    const organized = result.items?.length
+      ? await organize.autoOrganize(ctx, result.items, source === 'email' ? 'email' : 'capture', await ops.aiAllowed(ctx))
+      : null;
     return { ...result, organized };
+  },
+  // Works without an AI provider: falls back to keyword rules (plan.source tells the app which ran).
+  '/api/ai/organize': async (req, env, c) => {
+    const ctx = { env, ...c };
+    return organize.organizePreview(ctx, parse(organize.OrganizePreviewInput, await readJson(req)), await ops.aiAllowed(ctx));
   },
   '/api/organize/apply': async (req, env, c) => organize.organizeApply({ env, ...c }, parse(ApplyOrganizeInput, await readJson(req))),
   '/api/organize/undo': async (req, env, c) => organize.organizeUndo({ env, ...c }, parse(organize.UndoOrganizeInput, await readJson(req))),
@@ -116,14 +112,20 @@ const DATA_ROUTES: Record<string, Handler> = {
     const input = parse(email.SyncInput, await readJson(req));
     const accounts = await email.syncAccounts(env, c.db, c.userId, input);
     let triaged = 0;
-    const { data: prof } = await c.db.from('profiles').select('ai_enabled').single();
-    if (env.OPENAI_API_KEY && prof?.ai_enabled) {
+    let source: 'ai' | 'rules' = 'rules';
+    if (await ops.aiAllowed({ env, ...c })) {
       try {
-        await enforceLimits(env, c.userId);
         triaged = await email.triage(env, c.db, c.userId);
-      } catch { /* messages stay visible untriaged; next sync retries */ }
+        source = 'ai';
+      } catch { /* falls through to rules; AI retries these next sync */ }
     }
-    return { accounts, triaged };
+    if (source === 'rules') triaged = await email.triageWithRules(c.db, c.userId);
+    return { accounts, triaged, source };
+  },
+  // Works without AI: the digest falls back to counts and the most important messages.
+  '/api/ai/email-digest': async (req, env, c) => {
+    const input = parse(email.DigestInput, await readJson(req));
+    return { digest: await email.buildDigest(env, c.db, c.userId, input, await ops.aiAllowed({ env, ...c })) };
   },
   '/api/email/modify': async (req, env, c) => email.modifyMessages(env, c.db, c.userId, parse(email.ModifyInput, await readJson(req))),
 };

@@ -34,13 +34,13 @@ export default function LifeAreas() {
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
         <IconButton name="chevron-left" label="Back" onPress={() => (router.canGoBack() ? router.back() : router.navigate('/more'))} />
         <H1 style={{ flex: 1 }}>Life Areas</H1>
-        {store.profile?.ai_enabled !== false && <IconButton name="star" label="Organize with AI" color={colors.pink} onPress={() => setOrganizing(true)} />}
+        <IconButton name="star" label="Organize" color={colors.pink} onPress={() => setOrganizing(true)} />
         <IconButton name="plus" label="Add life area" onPress={() => setEdit({ name: '', color: AREA_COLORS[active.length % AREA_COLORS.length], icon: 'circle' })} />
       </View>
       <Muted style={{ marginBottom: 12 }}>Ways to group your life — never quotas.</Muted>
       {note && <Banner text={note} />}
-      {unfiled > 0 && store.profile?.ai_enabled !== false && (
-        <Button variant="soft" icon="star" title={`File ${unfiled} unsorted item${unfiled === 1 ? '' : 's'} with AI`} onPress={() => setOrganizing(true)} style={{ marginBottom: 12, minHeight: 46 }} />
+      {unfiled > 0 && (
+        <Button variant="soft" icon="star" title={`File ${unfiled} unsorted item${unfiled === 1 ? '' : 's'}`} onPress={() => setOrganizing(true)} style={{ marginBottom: 12, minHeight: 46 }} />
       )}
       <OrganizeSheet visible={organizing} onClose={() => setOrganizing(false)} onApplied={(t) => setNote(t)} />
       <Card style={{ paddingVertical: 4 }}>

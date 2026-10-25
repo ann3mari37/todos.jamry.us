@@ -13,7 +13,7 @@ import { PROMPTS } from './prompts';
 import { summarySchema } from './schemas';
 import { ProgressSummaryOutput } from '../../app/src/core/ai-contracts';
 import { serviceClient } from './supabase';
-import { buildDigest, syncAccounts, triage } from './email/service';
+import { buildDigest, syncAccounts, triage, triageWithRules } from './email/service';
 
 export async function runScheduled(env: Env, now = new Date()) {
   const db = serviceClient(env);
@@ -87,8 +87,10 @@ async function emailDigestFor(env: Env, userId: string, aiEnabled: boolean) {
   const { count } = await db.from('email_accounts').select('id', { count: 'exact', head: true }).eq('user_id', userId);
   if (!count) return;
   await syncAccounts(env, db, userId, { force: true });
+  let aiTriaged = false;
   if (aiEnabled && env.OPENAI_API_KEY) {
-    try { await triage(env, db, userId, 30); } catch { /* digest falls back to counts */ }
+    try { await triage(env, db, userId, 30); aiTriaged = true; } catch { /* rules below */ }
   }
+  if (!aiTriaged) await triageWithRules(db, userId);
   await buildDigest(env, db, userId, { regenerate: true }, aiEnabled && !!env.OPENAI_API_KEY);
 }

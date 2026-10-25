@@ -36,6 +36,7 @@ export interface EmailDigest { id: string; digest_date: string; summary: string;
 export interface OrganizeChange { kind: 'action' | 'goal'; id: string; title: string; from_goal_id?: string | null; to_goal_id?: string | null; from_area_id: string | null; to_area_id: string | null }
 export interface OrganizeRun { id: string; trigger: string; created_goal_ids: string[]; changes: OrganizeChange[]; undone_at: string | null; created_at: string }
 export interface OrganizePlan {
+  source?: 'ai' | 'rules';
   new_projects: { ref: string; title: string; life_area_id: string | null; reason: string; action_count: number }[];
   assignments: { kind: 'action' | 'goal'; id: string; title: string; goal_id: string | null; goal_ref: string | null; life_area_id: string | null; confidence: number; reason: string; from_goal_id: string | null; from_area_id: string | null }[];
 }

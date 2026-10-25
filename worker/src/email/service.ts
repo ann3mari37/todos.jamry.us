@@ -7,6 +7,7 @@ import { EmailDigestOutput, EmailThreadOutput, EmailTriageOutput } from '../../.
 import { toISODate } from '../../../app/src/core/dates';
 import type { Env } from '../env';
 import { callStructured } from '../openai';
+import { triageEmail } from '../../../app/src/core/rules';
 import { keepId } from '../ops';
 import { PROMPTS } from '../prompts';
 import * as S from '../schemas';
@@ -138,6 +139,29 @@ export async function triage(env: Env, db: SupabaseClient, userId: string, limit
   // Anything the model skipped is marked so it isn't re-sent forever.
   if (ids.size) await db.from('email_messages').update({ category: 'other', importance: 1, triaged_at: now }).in('id', [...ids]);
   return n;
+}
+
+/**
+ * Keyword triage for when no AI is available. It fills in category/summary/suggestions but leaves triaged_at empty,
+ * so AI triage picks these messages up (and improves them) once a provider is configured.
+ */
+export async function triageWithRules(db: SupabaseClient, userId: string, limit = 60) {
+  const pending = await rows<Msg>(
+    db.from('email_messages').select('id,account_id,provider_message_id,thread_id,from_name,from_address,subject,snippet,received_at,category,importance,summary')
+      .eq('user_id', userId).is('triaged_at', null).is('category', null).eq('is_archived', false)
+      .order('received_at', { ascending: false }).limit(limit),
+  );
+  if (!pending.length) return 0;
+  const accounts = await rows<{ id: string; life_area_id: string | null }>(db.from('email_accounts').select('id,life_area_id').eq('user_id', userId));
+  const areaFor = new Map(accounts.map((a) => [a.id, a.life_area_id]));
+  for (const m of pending) {
+    const t = triageEmail(m);
+    await db.from('email_messages').update({
+      category: t.category, importance: t.importance, summary: t.summary, suggested_actions: t.suggested_actions,
+      life_area_id: areaFor.get(m.account_id) ?? null,
+    }).eq('id', m.id);
+  }
+  return pending.length;
 }
 
 // ───────────────────────── digest

@@ -11,7 +11,7 @@ import {
 } from '../../app/src/core/ai-contracts';
 import { startOfWeek, toISODate } from '../../app/src/core/dates';
 import type { Env } from './env';
-import { callStructured } from './openai';
+import { callStructured, enforceLimits } from './openai';
 import { PROMPTS } from './prompts';
 import * as S from './schemas';
 import { HttpError } from './supabase';
@@ -33,6 +33,19 @@ export async function profile(ctx: Ctx) {
   };
   if (!p.ai_enabled) throw new HttpError(403, 'ai_disabled');
   return p;
+}
+
+/** Whether this request may use the AI provider: configured, turned on by the user, and within limits. */
+export async function aiAllowed(ctx: Ctx): Promise<boolean> {
+  if (!ctx.env.OPENAI_API_KEY) return false;
+  const { data } = await ctx.db.from('profiles').select('ai_enabled').single();
+  if (!data?.ai_enabled) return false;
+  try {
+    await enforceLimits(ctx.env, ctx.userId);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ───────────────────────── interpret_capture

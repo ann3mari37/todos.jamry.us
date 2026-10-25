@@ -26,7 +26,7 @@ export default function Projects() {
     <Screen>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 14 }}>
         <H1 style={{ flex: 1 }}>Projects</H1>
-        {store.profile?.ai_enabled !== false && <IconButton name="star" label="Organize with AI" color={colors.pink} onPress={() => setOrganizing(true)} />}
+        <IconButton name="star" label="Organize" color={colors.pink} onPress={() => setOrganizing(true)} />
         <IconButton name="plus" label="New project" onPress={() => router.push({ pathname: '/capture', params: { mode: 'goal' } })} />
       </View>
       <Segmented value={tab} onChange={setTab} options={[{ value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }, { value: 'archived', label: 'Archived' }]} style={{ marginBottom: 14 }} />
@@ -63,7 +63,7 @@ export default function Projects() {
               <Icon name="inbox" size={22} color={colors.pinkDeep} />
               <View style={{ flex: 1 }}>
                 <Body style={{ fontFamily: fonts.medium }}>{loose.length} unsorted task{loose.length === 1 ? '' : 's'}</Body>
-                <Muted>Let AI group them into projects and life areas</Muted>
+                <Muted>Sort them into projects and life areas</Muted>
               </View>
               <Icon name="chevron-right" size={18} color={colors.textFaint} />
             </View>

@@ -95,7 +95,7 @@ export default function Today() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Icon name="folder" size={18} color={colors.teal} />
                 <Body style={{ flex: 1, fontSize: 14 }}>
-                  {organized?.text ?? `AI filed ${auto!.changes.length} new item${auto!.changes.length === 1 ? '' : 's'} into projects and life areas.`}
+                  {organized?.text ?? `Filed ${auto!.changes.length} new item${auto!.changes.length === 1 ? '' : 's'} into projects and life areas.`}
                 </Body>
                 <Pressable accessibilityRole="button" hitSlop={8} onPress={async () => { const id = organized?.runId ?? auto!.id; setOrganized(null); store.setLastOrganized(null); await store.organizeUndo(id).catch(() => setNote("Couldn't undo right now.")); }}>
                   <Text style={{ fontFamily: fonts.semibold, color: colors.teal }}>Undo</Text>
@@ -121,10 +121,10 @@ export default function Today() {
             </Card>
           )}
 
-          {loose.length >= 3 && store.profile?.ai_enabled !== false && (
+          {loose.length >= 3 && (
             <Pressable onPress={() => setOrganizing(true)} accessibilityRole="button" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.pinkWash, marginBottom: 12, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
               <Icon name="star" size={14} color={colors.pinkDeep} />
-              <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep, fontSize: 13 }}>{loose.length} unsorted tasks · Organize with AI</Text>
+              <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep, fontSize: 13 }}>{loose.length} unsorted tasks · Organize them</Text>
             </Pressable>
           )}
           {nudge && (

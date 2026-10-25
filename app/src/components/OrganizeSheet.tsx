@@ -6,7 +6,7 @@ import { colors, fonts, radius } from '../theme';
 import { Banner, Body, Button, Icon, Muted, Sheet } from './ui';
 
 /**
- * Review sheet for "Organize with AI": proposes new projects, moves loose tasks into projects,
+ * Review sheet for "Organize": AI (or keyword rules when AI is unavailable) proposes new projects, moves loose tasks into projects,
  * and files everything into life areas. Nothing changes until the user applies; applying can be undone.
  */
 export function OrganizeSheet({ visible, onClose, scope = 'loose', onApplied }: {
@@ -67,11 +67,11 @@ export function OrganizeSheet({ visible, onClose, scope = 'loose', onApplied }: 
     : null;
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Organize with AI">
+    <Sheet visible={visible} onClose={onClose} title="Organize">
       {!plan && !error && (
         <View style={{ alignItems: 'center', paddingVertical: 28, gap: 12 }} accessibilityLiveRegion="polite">
           <ActivityIndicator color={colors.pink} />
-          <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep }}>AI is sorting your tasks into projects and life areas…</Text>
+          <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep }}>Sorting your tasks into projects and life areas…</Text>
         </View>
       )}
       {error && <Banner tone="soft" text={error} />}
@@ -85,6 +85,7 @@ export function OrganizeSheet({ visible, onClose, scope = 'loose', onApplied }: 
 
       {grouped && plan && plan.assignments.length > 0 && (
         <>
+          {plan.source === 'rules' && <Banner tone="soft" text="Sorted by keywords because AI isn't connected. Check each suggestion." />}
           <Muted style={{ marginBottom: 6 }}>Review the suggestions. Uncheck anything that doesn't fit — nothing changes until you apply, and you can undo.</Muted>
 
           {grouped.newProjects.map(({ p, items }) => (
