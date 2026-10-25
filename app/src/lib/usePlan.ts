@@ -19,7 +19,11 @@ interface Plan {
   shown: string[];
   /** When the picks were last chosen; tasks added after this can fill open slots. */
   builtAt?: string;
+  /** Rules version that chose these picks; older plans are rebuilt once so rule changes show the same day. */
+  v?: number;
 }
+
+const PLAN_VERSION = 2;
 
 const key = (d: string) => `momentum.plan.${d}`;
 
@@ -35,14 +39,18 @@ export function usePlan() {
 
   useEffect(() => {
     AsyncStorage.getItem(key(today))
-      .then((raw) => setPlan(raw ? JSON.parse(raw) : null))
+      .then((raw) => {
+        const saved = raw ? (JSON.parse(raw) as Plan) : null;
+        setPlan(saved && saved.v === PLAN_VERSION ? saved : null);
+      })
       .catch(() => setPlan(null))
       .finally(() => setReady(true));
   }, [today]);
 
   const persist = useCallback((p: Plan) => {
-    setPlan(p);
-    AsyncStorage.setItem(key(today), JSON.stringify(p)).catch(() => {});
+    const next = { ...p, v: PLAN_VERSION };
+    setPlan(next);
+    AsyncStorage.setItem(key(today), JSON.stringify(next)).catch(() => {});
   }, [today]);
 
   const compute = useCallback((mode: DailyMode | null, exclude: string[] = [], onlyKind: RecommendationKind | null = null): Recommendation[] =>

@@ -149,7 +149,7 @@ export function recommend(input: RecommendInput): Recommendation[] {
     const d = actionDueDays(a, now);
     if (d === null) continue;
     const hard = a.deadline_type === 'hard';
-    if (d < -30 || d > (hard ? 7 : 3)) continue;
+    if (d < -30 || d > (hard ? 14 : 7)) continue;
     dated.push({ g: goalOf(a), a, d, hard, label: a.title, date: a.due_date!, left: null });
   }
   for (const g of input.goals) {
@@ -367,15 +367,38 @@ export function recommend(input: RecommendInput): Recommendation[] {
     return picks;
   }
 
+  // ── Like the mockup, try to show one of every kind. When a strict rule found nothing:
+  //    Meaningful Move → the most substantial standalone task (over 15 min), with why it matters
+  //    Quietly Waiting → a standalone task that has sat on the list 3+ days
+  //    (Time-Sensitive stays honest: only real dates.)
+  const has = (k: RecommendationKind) => out.some((r) => r.kind === k);
+  if (!has('meaningful_move')) {
+    const big = ready
+      .filter((a) => !usedActions.has(a.id) && !a.goal_id && minutes(a) > 15)
+      .sort((x, y) => minutes(y) - minutes(x) || x.created_at.localeCompare(y.created_at))[0];
+    if (big) take('meaningful_move', null, big, whyFor(big), 25);
+  }
+  if (!has('quietly_waiting')) {
+    const sitting = ready
+      .filter((a) => !usedActions.has(a.id) && !a.goal_id)
+      .map((a) => ({ a, days: daysSince(a.created_at, now) ?? 0 }))
+      .filter((x) => x.days >= 3)
+      .sort((x, y) => y.days - x.days)[0];
+    if (sitting) take('quietly_waiting', null, sitting.a, `On your list for ${sitting.days} days. A small step would move it along.`, 16);
+  }
+
   const shown = new Set(out.map((r) => r.action?.id).filter(Boolean) as string[]);
-  // A mix: one from each category that has something, then Next Up so there are at least 4 to choose from.
+  // Then Next Up so there are at least 4 to choose from.
   const fillTo = input.mode === 'show_all' ? 12 : 4;
   for (const a of nextUp(shown)) {
     if (out.length >= fillTo) break;
     take('next_up', goalOf(a), a, whyFor(a), 10);
   }
-  return out;
+  // Mockup order: Meaningful Move, Time-Sensitive, Easy Momentum, Quietly Waiting, then Next Up.
+  return out.sort((x, y) => KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind));
 }
+
+const KIND_ORDER: RecommendationKind[] = ['meaningful_move', 'time_sensitive', 'easy_momentum', 'quietly_waiting', 'next_up'];
 
 export const KIND_LABEL: Record<RecommendationKind, string> = {
   meaningful_move: 'Meaningful Move',

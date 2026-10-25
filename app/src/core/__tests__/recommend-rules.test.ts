@@ -25,10 +25,10 @@ describe('Time-Sensitive', () => {
     expect(r?.action?.title).toBe('Return library book');
     expect(r?.reason).toBe('Return library book was due Oct 18 (target date). About 10 min.');
   });
-  it('says "due today" and ignores target dates more than 3 days out', () => {
+  it('says "due today" and ignores target dates more than 7 days out', () => {
     const today = action({ title: 'Submit form', due_date: '2026-10-20', deadline_type: 'hard', estimated_minutes: 40 });
     expect(pick(recommend({ goals: [], actions: [today], now: NOW }), 'time_sensitive')?.reason).toBe('Submit form is due today.');
-    const later = action({ title: 'Plan dinner', due_date: '2026-10-26', deadline_type: 'target' });
+    const later = action({ title: 'Plan dinner', due_date: '2026-10-30', deadline_type: 'target' });
     expect(pick(recommend({ goals: [], actions: [later], now: NOW }), 'time_sensitive')).toBeUndefined();
   });
 });
@@ -165,5 +165,21 @@ describe('filter row (one category)', () => {
     for (const kind of ['time_sensitive', 'meaningful_move', 'easy_momentum', 'quietly_waiting', 'next_up'] as const) {
       expect(recommend({ goals: [g], actions: all(), now: NOW, onlyKind: kind }).every((r) => r.kind === kind)).toBe(true);
     }
+  });
+});
+
+describe('mockup-style mix', () => {
+  it('shows one of each kind, in mockup order, for a plain list of standalone tasks', () => {
+    const tasks = [
+      action({ title: 'Update my crm', estimated_minutes: null, created_at: '2026-10-14T10:00:00Z' }),
+      action({ title: 'Clean my laundry', estimated_minutes: null, created_at: '2026-10-14T10:00:00Z' }),
+      action({ title: 'Cook dinner', estimated_minutes: null, created_at: '2026-10-19T10:00:00Z' }),
+      action({ title: 'Pay rent', estimated_minutes: 10, due_date: '2026-10-25', deadline_type: 'target', created_at: '2026-10-19T10:00:00Z' }),
+      action({ title: 'Write a business plan', estimated_minutes: 90, created_at: '2026-10-19T10:00:00Z' }),
+    ];
+    const recs = recommend({ goals: [], actions: tasks, now: NOW });
+    expect(recs.map((r) => r.kind)).toEqual(['meaningful_move', 'time_sensitive', 'easy_momentum', 'quietly_waiting']);
+    expect(recs[0].action?.title).toBe('Write a business plan');
+    expect(recs[3].reason).toBe('On your list for 6 days. A small step would move it along.');
   });
 });
