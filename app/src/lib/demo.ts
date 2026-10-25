@@ -32,6 +32,7 @@ const GOALS: Goal[] = [
   goal('g-garage', 'Organize the garage', 'a-home', { last_meaningful_progress_at: iso(-16 * D), meaning: 'Room to breathe at home.', meaning_source: 'user' }),
   goal('g-web', 'Launch website', 'a-work'),
   goal('g-trip', 'Plan trip', 'a-rel'),
+  goal('g-app', 'Create a project management app for Malinda', 'a-work', { created_at: iso(-H) }), // no steps yet
 ];
 
 let seq = 0;

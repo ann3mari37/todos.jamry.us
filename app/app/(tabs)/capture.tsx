@@ -5,6 +5,7 @@ import { Banner, Body, Button, Card, Chip, Field, H1, Icon, IconCircle, Muted, S
 import type { CaptureItem, CommitItem } from '../../src/core/ai-contracts';
 import { toISODate } from '../../src/core/dates';
 import { fallbackInterpret, guessLifeArea } from '../../src/core/fallback-capture';
+import { suggestSteps } from '../../src/core/templates';
 import { useStore, uuid } from '../../src/lib/store';
 import { useSpeech } from '../../src/lib/useSpeech';
 import { colors, fonts, radius, shadow } from '../../src/theme';
@@ -52,7 +53,8 @@ export default function Capture() {
     setNotice(null); setQuestions([]); setCaptureId(null);
     const goals = store.goals.filter((g) => ['active', 'waiting', 'blocked'].includes(g.status));
     const local = mode === 'goal'
-      ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw, suggested_life_area_id: guessLifeArea(raw, store.lifeAreas) })] }
+      ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw, suggested_life_area_id: guessLifeArea(raw, store.lifeAreas),
+          next_actions: suggestSteps(raw).steps.slice(0, 3).map((st) => ({ title: st.title, estimated_minutes: st.minutes })) })] }
       : fallbackInterpret(raw, store.lifeAreas, goals);
     setDrafts(local.items.map((i) => {
       const goalId = params.goal ?? i.suggested_goal_id;

@@ -1,12 +1,13 @@
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
 import { ProjectBanner } from '../../src/components/FlowerArt';
 import { Banner, Body, Button, Card, Chip, Divider, Field, H1, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, shortDate, timeOfDay } from '../../src/core/dates';
 import { goalProgress } from '../../src/core/recommend';
 import { suggestWhy } from '../../src/core/rules';
+import { suggestSteps } from '../../src/core/templates';
 import type { AccountabilityMode, Action, Goal, GoalStatus } from '../../src/core/types';
 import { api, friendlyAiError } from '../../src/lib/api';
 import { useStore } from '../../src/lib/store';
@@ -21,6 +22,8 @@ const ACCOUNTABILITY: { value: AccountabilityMode; label: string }[] = [
   { value: 'default', label: 'Default' }, { value: 'keep_visible', label: 'Keep this visible' }, { value: 'help_me', label: 'Help me make progress' },
   { value: 'i_avoid_this', label: 'I tend to avoid this' }, { value: 'do_not_remind', label: "Don't remind me right now" },
 ];
+
+const withArticle = (w: string) => `${/^[aeiou]/i.test(w) ? 'an' : 'a'} ${w}`;
 
 interface ContextRow { id: string; kind: string; body: string; resolved_at: string | null; created_at: string }
 
@@ -40,6 +43,19 @@ export default function Project() {
     supabase.from('goal_context').select('*').eq('goal_id', id).order('created_at', { ascending: false }).then(({ data }) => setContext((data ?? []) as ContextRow[]));
   };
   useEffect(loadContext, [id]);
+
+  // A project with no steps at all gets its first few from the matching template, once, as suggestions to keep or remove.
+  const autoSuggested = useRef<string | null>(null);
+  useEffect(() => {
+    if (!goal || store.loading || autoSuggested.current === goal.id) return;
+    autoSuggested.current = goal.id;
+    const has = store.actions.some((a) => a.goal_id === goal.id && a.status !== 'dismissed');
+    if (has || !['active', 'waiting', 'blocked'].includes(goal.status)) return;
+    const { template, steps } = suggestSteps(goal.title, [], 3);
+    store.createSteps(goal.id, steps.map((st) => ({ title: st.title, estimated_minutes: st.minutes })))
+      .then(() => setAiNote(`Here's a start from ${withArticle(template.label)} checklist. Keep what fits, remove what doesn't.`))
+      .catch(() => {});
+  }, [goal?.id, store.loading]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (assist === 'blocker' || assist === 'smaller') findBlockers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,15 +84,24 @@ export default function Project() {
 
   const update = (p: Partial<Goal>) => store.updateGoal(goal.id, p);
 
+  // Rule-based steps from the matching template (no AI needed), skipping ones the project already has.
+  const fromTemplate = async () => {
+    const { template, steps } = suggestSteps(goal.title, actions.filter((a) => a.status !== 'dismissed').map((a) => a.title), 3);
+    if (!steps.length) { setAiNote(`All the usual steps for ${withArticle(template.label)} are already here. Add your own with +.`); return; }
+    await store.createSteps(goal.id, steps.map((st) => ({ title: st.title, estimated_minutes: st.minutes })));
+    setAiNote(`Suggested from ${withArticle(template.label)} checklist. Keep what fits, remove what doesn't.`);
+  };
+
   const generate = async (regenerate = false) => {
     setGenBusy(true); setAiNote(null);
+    if (store.profile?.ai_enabled === false) { await fromTemplate().finally(() => setGenBusy(false)); return; }
     try {
       const res = await api<{ uncertainty_note: string | null; questions: string[]; suggested_actions: unknown[] }>('/api/ai/decompose-goal', { goal_id: goal.id, regenerate });
       if (res.uncertainty_note) setAiNote(res.uncertainty_note);
       else if (!res.suggested_actions.length) setAiNote('No new steps to suggest right now — your current steps cover it.');
       await store.refresh(); loadContext();
-    } catch (e) {
-      setAiNote(`${friendlyAiError(e).replace(/Organized without AI.*$/, '')} You can add a step yourself.`.trim());
+    } catch {
+      await fromTemplate(); // AI unavailable → the template still gives useful next steps
     } finally { setGenBusy(false); }
   };
 

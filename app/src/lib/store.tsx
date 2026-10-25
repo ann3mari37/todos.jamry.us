@@ -379,6 +379,27 @@ function useStoreValue() {
     await refresh();
   }, [data.actions, refresh]);
 
+  /** Adds several steps to a project at once (template or AI suggestions show as 'suggested' with Keep / ✕). */
+  const createSteps = useCallback(async (goalId: string, steps: { title: string; estimated_minutes: number | null }[], status: 'suggested' | 'ready' = 'suggested') => {
+    if (!steps.length) return;
+    const base = data.actions.filter((x) => x.goal_id === goalId).length;
+    const rows = steps.map((st, i) => ({ goal_id: goalId, title: st.title, estimated_minutes: st.estimated_minutes, status, origin: 'ai' as const, sort_order: base + i }));
+    const now = new Date().toISOString();
+    const local: Action[] = rows.map((r, i) => ({
+      id: `local-step-${Date.now()}-${i}`, life_area_id: null, notes: null, completion_criteria: null, requires_clarification: false, user_edited: false,
+      times_recommended: 0, times_skipped: 0, completed_at: null, created_at: now, due_date: null, deadline_type: 'none' as const, ...r,
+    }));
+    if (DEMO) {
+      // Demo data lives in memory; update it directly so a concurrent refresh can't drop the new steps.
+      demo.current = { ...demo.current, actions: [...demo.current.actions, ...local] };
+      setData({ ...demo.current });
+      return;
+    }
+    patch((s) => ({ ...s, actions: [...s.actions, ...local] }));
+    await check(supabase.from('actions').insert(rows));
+    await refresh();
+  }, [data.actions, patch, refresh]);
+
   const updateAction = useCallback(async (id: string, p: Partial<Action>) => {
     const edited = p.title !== undefined || p.estimated_minutes !== undefined ? { user_edited: true } : {};
     patch((s) => ({ ...s, actions: s.actions.map((a) => (a.id === id ? { ...a, ...p, ...edited } : a)) }));
@@ -452,12 +473,12 @@ function useStoreValue() {
   return useMemo(() => ({
     session, authReady, loading, online, pending, ...data, lastOrganized, setLastOrganized,
     refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture, updateAccomplishment, deleteAccomplishment,
-    createAction, updateAction, createGoal, updateGoal, giveFeedback, respondNudge, upsertLifeArea, deleteLifeArea,
+    createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge, upsertLifeArea, deleteLifeArea,
     updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
     organizePreview, organizeApply, organizeUndo,
     emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount, emailSync, emailRefreshDigest, emailThread, emailModify,
   }), [session, authReady, loading, online, pending, data, lastOrganized, refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
-    updateAccomplishment, deleteAccomplishment, createAction, updateAction, createGoal, updateGoal, giveFeedback, respondNudge,
+    updateAccomplishment, deleteAccomplishment, createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge,
     upsertLifeArea, deleteLifeArea, updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
     organizePreview, organizeApply, organizeUndo, emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount,
     emailSync, emailRefreshDigest, emailThread, emailModify]);

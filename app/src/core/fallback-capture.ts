@@ -3,6 +3,7 @@
 
 import type { CaptureItem } from './ai-contracts';
 import { estimateMinutes, guessLifeArea, matchProject, parseDue, stripDue, type AreaLike } from './rules';
+import { suggestSteps } from './templates';
 
 export { guessLifeArea } from './rules';
 
@@ -72,7 +73,8 @@ export function fallbackInterpret(
       deadline_type: due?.type ?? 'none',
       occurred_at: null,
       confidence: 0.4,
-      next_actions: [],
+      // A new project starts with its first few steps from the matching template (editable before saving).
+      next_actions: kind === 'goal' ? suggestSteps(title).steps.slice(0, 3).map((st) => ({ title: st.title, estimated_minutes: st.minutes })) : [],
     };
   });
   return { items, questions: [] };
