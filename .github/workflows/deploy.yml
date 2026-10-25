@@ -22,7 +22,9 @@ jobs:
         working-directory: worker
 
   deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Deploys only once the repo is set up for it: add the secrets/variables listed in docs/OPERATIONS.md,
+    # then create the repository variable AUTO_DEPLOY = true. Until then pushes run the tests only.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.AUTO_DEPLOY == 'true'
     needs: test
     runs-on: ubuntu-latest
     env:
