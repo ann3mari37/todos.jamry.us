@@ -3,6 +3,7 @@
 // AI may later rewrite the `reason` text, but never decides eligibility.
 
 import { daysSince, daysUntil, friendlyDate } from './dates';
+import { estimateMinutes } from './rules';
 import type {
   Action,
   DailyMode,
@@ -85,7 +86,8 @@ export function readyActions(input: RecommendInput): Action[] {
 }
 
 function minutes(a: Action): number {
-  return a.estimated_minutes ?? 20;
+  // Unestimated tasks get a guess from their wording, so quick ones ("Call…", "Reply…") can still be suggested.
+  return a.estimated_minutes ?? estimateMinutes(a.title) ?? 20;
 }
 
 function deadlineDays(g: Goal | null | undefined, now: Date): number | null {

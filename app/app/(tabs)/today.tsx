@@ -6,6 +6,7 @@ import { DigestCard } from '../../src/components/EmailBits';
 import { Flower } from '../../src/components/Flower';
 import { FlowerArt } from '../../src/components/FlowerArt';
 import { OrganizeSheet } from '../../src/components/OrganizeSheet';
+import { TaskList, useOpenTasks } from '../../src/components/TaskList';
 import { Ring } from '../../src/components/Ring';
 import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay } from '../../src/core/dates';
@@ -41,6 +42,8 @@ export default function Today() {
   // Unsorted = no project and no life area. A standalone task filed in an area is fine as it is.
   const loose = store.actions.filter((a) => !a.goal_id && !a.life_area_id && ['ready', 'in_progress', 'waiting', 'blocked'].includes(a.status));
   const auto = store.lastOrganized;
+  const pickedIds = new Set(plan.picks.map((p) => p.pick.action_id));
+  const otherTasks = useOpenTasks((a) => !pickedIds.has(a.id));
   const inboxAction = store.emailMessages.filter((m) => m.category === 'action_needed' && m.status === 'new').length;
 
   const nudge = store.nudges.find((n) => !n.response && Date.now() - new Date(n.created_at).getTime() < 7 * 86_400_000);
@@ -202,6 +205,9 @@ export default function Today() {
               {MODES.map((m) => <Chip key={m.value} label={m.label} selected={plan.mode === m.value} onPress={() => { plan.setMode(plan.mode === m.value ? null : m.value); setShowModes(false); }} />)}
             </View>
           )}
+
+          <Label>{plan.picks.length ? 'Everything else on your list' : 'Your list'}</Label>
+          <TaskList tasks={otherTasks} limit={6} emptyText="Nothing else on your list." />
 
           <Label>Recent accomplishments</Label>
           {store.accomplishments.slice(0, 3).map((a) => (

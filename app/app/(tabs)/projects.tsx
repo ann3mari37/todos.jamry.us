@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { OrganizeSheet } from '../../src/components/OrganizeSheet';
+import { TaskList, useOpenTasks } from '../../src/components/TaskList';
 import { Text, View } from 'react-native';
 import { Card, Body, H1, Icon, IconButton, Muted, ProgressBar, Screen, Segmented } from '../../src/components/ui';
 import { goalIcon } from '../../src/lib/icons';
@@ -18,6 +19,7 @@ export default function Projects() {
   const [tab, setTab] = useState<'active' | 'completed' | 'archived'>('active');
   const [organizing, setOrganizing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const standalone = useOpenTasks((a) => !a.goal_id);
   const list = store.goals.filter((g) =>
     tab === 'active' ? ['active', 'waiting', 'blocked', 'paused'].includes(g.status) : g.status === tab,
   );
@@ -71,6 +73,12 @@ export default function Projects() {
         ) : null;
       })()}
       {note && <Muted style={{ textAlign: 'center', color: colors.teal, marginBottom: 8 }}>{note}</Muted>}
+      {tab === 'active' && standalone.length > 0 && (
+        <Card>
+          <Body style={{ fontFamily: fonts.medium, marginBottom: 4 }}>Tasks without a project</Body>
+          <TaskList tasks={standalone} limit={8} />
+        </Card>
+      )}
       <OrganizeSheet visible={organizing} onClose={() => setOrganizing(false)} onApplied={(t) => setNote(t)} />
       {list.length === 0 && (
         <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
