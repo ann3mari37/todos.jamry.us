@@ -21,11 +21,12 @@ export const HandoffItem = z.object({
   area: z.string().trim().max(60).optional().describe('Life area name, e.g. Home, Work, Health'),
   project: z.string().trim().max(200).optional().describe('Existing project this belongs to (title or id)'),
   steps: z.array(HandoffStep).max(5).optional().describe('First steps for a project'),
+  from_email: z.string().uuid().optional().describe('The email (id from get_inbox) this came from; the task links back to it'),
 });
 export type HandoffItem = z.infer<typeof HandoffItem>;
 
 /** A reviewable item: a capture item plus the "why it matters" text that goes on projects. */
-export type HandoffDraft = CaptureItem & { meaning: string };
+export type HandoffDraft = CaptureItem & { meaning: string; source_email_id?: string | null };
 
 /** Stored in capture_entries.interpretation for source 'chat'. */
 export interface HandoffInterpretation {
@@ -90,6 +91,7 @@ export function handoffToDrafts(items: HandoffItem[], areas: AreaLike[], goals: 
       confidence: 1,
       next_actions: steps,
       meaning,
+      source_email_id: it.from_email ?? null,
     };
   });
 }
@@ -109,5 +111,6 @@ export function draftsToCommit(drafts: (HandoffDraft & { client_id: string })[])
     meaningful: d.kind === 'accomplishment' && !!d.suggested_goal_id,
     next_actions: d.kind === 'goal' ? d.next_actions.filter((n) => n.title.trim()).slice(0, 5) : [],
     ...(d.kind === 'goal' && d.meaning.trim() ? { meaning: d.meaning.trim() } : {}),
+    ...(d.source_email_id ? { source_email_id: d.source_email_id } : {}),
   }));
 }

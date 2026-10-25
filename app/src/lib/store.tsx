@@ -32,6 +32,8 @@ export interface Handoff { id: string; raw_text: string; interpretation: Handoff
 export interface DayCheckin {
   day: string; started_at: string | null; ended_at: string | null; room_minutes: number | null;
   energy: 'low' | 'okay' | 'high' | null; tomorrow_first_action_id: string | null; note: string | null;
+  /** Today's plan (see usePlan), shared by all the person's devices. */
+  plan?: unknown;
 }
 /** An AI app the user allowed to reach Momentum (Supabase OAuth grant). */
 export interface ChatConnection { client_id: string; name: string; uri: string | null; granted_at: string }
@@ -44,8 +46,13 @@ export interface EmailMessage {
   snippet: string | null; received_at: string; is_unread: boolean; is_archived: boolean; labels: string[];
   category: EmailCategory | null; importance: number | null; summary: string | null; life_area_id: string | null; suggested_goal_id: string | null;
   suggested_actions: EmailStep[]; thread_summary: string | null; thread_next_steps: EmailStep[]; status: 'new' | 'reviewed' | 'tasks_created' | 'dismissed';
+  provider_message_id: string; web_link?: string | null; message_id_header?: string | null;
 }
-export interface EmailDigest { id: string; digest_date: string; summary: string; highlights: { message_id: string; text: string }[]; counts: Record<string, number>; created_at: string }
+export interface EmailDigest {
+  id: string; digest_date: string; summary: string; highlights: { message_id: string; text: string }[]; counts: Record<string, number>; created_at: string;
+  /** rules = Momentum's rules · ai = Momentum's AI · chat = the person's own AI chat through the connector */
+  source?: 'rules' | 'ai' | 'chat'; author?: string | null; do_first?: { message_id: string; why: string }[]; updated_at?: string;
+}
 export interface OrganizeChange { kind: 'action' | 'goal'; id: string; title: string; from_goal_id?: string | null; to_goal_id?: string | null; from_area_id: string | null; to_area_id: string | null }
 export interface OrganizeRun { id: string; trigger: string; created_goal_ids: string[]; changes: OrganizeChange[]; undone_at: string | null; created_at: string }
 export interface OrganizePlan {
@@ -231,7 +238,7 @@ function useStoreValue() {
       const yesterday = toISODate(new Date(Date.now() - 86_400_000));
       const [emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs, checkins] = await Promise.all([
         soft(supabase.from('email_accounts').select('*').order('created_at'), [] as EmailAccount[]),
-        soft(supabase.from('email_messages').select('id,account_id,thread_id,from_name,from_address,subject,snippet,received_at,is_unread,is_archived,labels,category,importance,summary,life_area_id,suggested_goal_id,suggested_actions,thread_summary,thread_next_steps,status')
+        soft(supabase.from('email_messages').select('*')
           .eq('is_archived', false).gte('received_at', weekAgo).order('received_at', { ascending: false }).limit(200), [] as EmailMessage[]),
         soft(supabase.from('email_digests').select('*').order('digest_date', { ascending: false }).limit(1).maybeSingle(), null as EmailDigest | null),
         soft(supabase.from('organize_runs').select('*').order('created_at', { ascending: false }).limit(10), [] as OrganizeRun[]),

@@ -32,6 +32,8 @@ interface Plan {
   done?: string[];
   /** What "Start my day" said about time and energy; rebuilds keep fitting the plan to it. */
   day?: DaySettings;
+  /** When this copy was saved; the newest copy wins across devices. */
+  savedAt?: string;
 }
 
 const PLAN_VERSION = 3;
@@ -69,10 +71,21 @@ export function usePlan() {
   }, [today]);
 
   const persist = useCallback((p: Plan) => {
-    const next = { ...p, v: PLAN_VERSION };
+    const next = { ...p, v: PLAN_VERSION, savedAt: new Date().toISOString() };
     setPlan(next);
     AsyncStorage.setItem(key(today), JSON.stringify(next)).catch(() => {});
-  }, [today]);
+    // Saved to the account too, so the phone and the computer show the same Today.
+    store.saveCheckin(today, { plan: next }).catch(() => {});
+  }, [today, store.saveCheckin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Another device saved a newer plan for today: use it.
+  const serverPlan = store.checkins.find((c) => c.day === today)?.plan as Plan | undefined;
+  useEffect(() => {
+    if (!ready || !serverPlan || serverPlan.v !== PLAN_VERSION) return;
+    if (plan && (serverPlan.savedAt ?? '') <= (plan.savedAt ?? '')) return;
+    setPlan(serverPlan);
+    AsyncStorage.setItem(key(today), JSON.stringify(serverPlan)).catch(() => {});
+  }, [ready, serverPlan, plan, today]);
 
   const compute = useCallback((mode: DailyMode | null, exclude: string[] = [], onlyKind: RecommendationKind | null = null): Recommendation[] =>
     recommend({
@@ -180,6 +193,43 @@ export function usePlan() {
     persist(next);
   }, [plan, store.actions, store.loading, replacementFor, persist]);
 
+  /**
+   * Back / Next on a card: steps through every suggestion of that card's kind and wraps around, so the card never runs
+   * out. Browsing skips nothing: only finishing a task or "Not today" takes it out of the cycle.
+   */
+  const cycle = useCallback((kind: RecommendationKind, current: string | null) => {
+    if (!plan) return [] as Recommendation[];
+    const others = plan.picks.map((p) => p.action_id).filter((id): id is string => !!id && id !== current);
+    return compute(null, [...others, ...(plan.skipped ?? []), ...(plan.done ?? [])], kind).filter((r) => r.action);
+  }, [plan, compute]);
+
+  /** Position of a card within its kind ("2 of 5"); total 1 means there's nothing to browse to. */
+  const position = useCallback((pick: Pick) => {
+    const list = cycle(pick.kind, pick.action_id);
+    const i = list.findIndex((r) => r.action!.id === pick.action_id);
+    return { index: i < 0 ? 0 : i, total: Math.max(list.length, 1) + (i < 0 && pick.action_id ? 1 : 0) };
+  }, [cycle]);
+
+  const browse = useCallback((pick: Pick, dir: 1 | -1) => {
+    if (!plan) return false;
+    const list = cycle(pick.kind, pick.action_id);
+    if (!list.length || (list.length === 1 && list[0].action!.id === pick.action_id)) return false;
+    const i = list.findIndex((r) => r.action!.id === pick.action_id);
+    const next = list[i < 0 ? (dir === 1 ? 0 : list.length - 1) : (i + dir + list.length) % list.length];
+    const picks = plan.picks.map((p) => (p === pick ? { ...toPick(next), kind: pick.kind } : p));
+    persist({ ...plan, picks, shown: [...new Set([...plan.shown, next.action!.id])] });
+    return true;
+  }, [plan, cycle, persist]);
+
+  /** "Not today": out of today's cycle; the card moves on to the next of its kind, or goes if there's none. */
+  const notToday = useCallback((pick: Pick) => {
+    if (!plan) return;
+    const next = replacementFor(plan, pick, true, [...(plan.done ?? []), ...(pick.action_id ? [pick.action_id] : [])]);
+    const picks = plan.picks.filter((p) => p !== pick);
+    if (next) picks.splice(plan.picks.indexOf(pick), 0, toPick(next));
+    persist({ ...plan, picks, shown: [...plan.shown, ...(next?.action ? [next.action.id] : [])], skipped: [...(plan.skipped ?? []), ...(pick.action_id ? [pick.action_id] : [])] });
+  }, [plan, replacementFor, persist]);
+
   const remove = useCallback((pick: Pick) => {
     if (plan) persist({ ...plan, picks: plan.picks.filter((p) => p !== pick), skipped: [...(plan.skipped ?? []), ...(pick.action_id ? [pick.action_id] : [])] });
   }, [plan, persist]);
@@ -207,5 +257,5 @@ export function usePlan() {
   // Everything on Today got done and nothing of those kinds is left.
   const finished = resolved.every((r) => !r.action) && (plan?.done?.length ?? 0) > 0;
 
-  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, startDay, swap, remove, addMore, byKind };
+  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, startDay, swap, remove, addMore, byKind, browse, position, notToday };
 }

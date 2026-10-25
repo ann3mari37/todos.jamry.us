@@ -212,6 +212,7 @@ export class ImapProvider implements MailProvider {
         received_at: new Date(String(f.INTERNALDATE ?? Date.now())).toISOString(),
         is_unread: !flags.some((x) => /\\Seen/i.test(x)),
         labels: [],
+        message_id_header: clip(h['message-id'] ?? null, 500),
       };
     }).filter((m) => new Date(m.received_at) >= new Date(sinceISO));
   }

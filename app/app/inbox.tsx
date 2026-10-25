@@ -7,7 +7,7 @@ import type { CommitItem, EmailStep } from '../src/core/ai-contracts';
 import { friendlyDate, startOfDay, timeOfDay } from '../src/core/dates';
 import { friendlyAiError } from '../src/lib/api';
 import { useStore, uuid, type EmailMessage } from '../src/lib/store';
-import { CATEGORY_META, DigestCard } from '../src/components/EmailBits';
+import { CATEGORY_META, InboxBriefing, OpenInMail } from '../src/components/EmailBits';
 import { colors, fonts, radius } from '../src/theme';
 
 type Tab = 'action' | 'waiting' | 'all';
@@ -44,7 +44,6 @@ export default function Inbox() {
   const waiting = msgs.filter((m) => m.category === 'waiting_on' && m.status !== 'dismissed');
   const list = tab === 'action' ? action : tab === 'waiting' ? waiting : msgs;
   const acct = (id: string) => store.emailAccounts.find((a) => a.id === id);
-  const digest = store.emailDigest;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
@@ -81,7 +80,7 @@ export default function Inbox() {
               )}
               {note && <Banner tone="soft" text={note} />}
 
-              {digest && <DigestCard digest={digest} onOpen={(id) => { const m = store.emailMessages.find((x) => x.id === id); if (m) setOpen(m); }} />}
+              <InboxBriefing onOpen={(id) => { const m = store.emailMessages.find((x) => x.id === id); if (m) setOpen(m); }} />
 
               <Segmented
                 value={tab}
@@ -143,6 +142,7 @@ function MessageRow({ m, color, onPress }: { m: EmailMessage; color: string; onP
               </View>
             )}
             {m.status === 'tasks_created' && <Muted style={{ fontSize: 12, color: colors.teal }}>✓ In your plan</Muted>}
+            <OpenInMail m={m} small />
             {m.suggested_actions.length > 0 && m.status !== 'tasks_created' && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                 <Icon name="plus-circle" size={12} color={colors.pinkDeep} />
@@ -201,7 +201,8 @@ function MessageSheet({ m, onClose }: { m: EmailMessage | null; onClose: () => v
         </View>
       </View>
 
-      <View style={{ backgroundColor: colors.card, borderRadius: radius.md, padding: 14, borderWidth: 1, borderColor: colors.border }}>
+      <OpenInMail m={live} />
+      <View style={{ backgroundColor: colors.card, borderRadius: radius.md, padding: 14, borderWidth: 1, borderColor: colors.border, marginTop: 6 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           <Icon name="star" size={13} color={colors.pink} />
           <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.pinkDeep }}>{live.thread_summary ? 'Thread summary' : 'Summary'}</Text>

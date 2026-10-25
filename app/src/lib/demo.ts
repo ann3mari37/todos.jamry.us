@@ -88,9 +88,10 @@ const ACCOUNTS: EmailAccount[] = [
   { id: 'm-work', provider: 'outlook', email_address: 'you@company.com', display_name: 'Work', color: '#47A9A6', life_area_id: 'a-work', digest_enabled: true, status: 'active', error_code: null, last_synced_at: iso(-20 * 60_000) },
 ];
 const mail = (id: string, account_id: string, from_name: string, subject: string, hoursAgo: number, category: EmailMessage['category'], importance: number, summary: string, life_area_id: string | null, suggested: EmailMessage['suggested_actions'] = [], extra: Partial<EmailMessage> = {}): EmailMessage => ({
-  id, account_id, thread_id: id, from_name, from_address: `${from_name.split(' ')[0].toLowerCase()}@example.com`, subject, snippet: summary, received_at: iso(-hoursAgo * H),
+  id, account_id, provider_message_id: `demo-${id}`, thread_id: id, from_name, from_address: `${from_name.split(' ')[0].toLowerCase()}@example.com`, subject, snippet: summary, received_at: iso(-hoursAgo * H),
   is_unread: hoursAgo < 6, is_archived: false, labels: [], category, importance, summary, life_area_id, suggested_goal_id: null, suggested_actions: suggested,
-  thread_summary: null, thread_next_steps: [], status: 'new', ...extra,
+  thread_summary: null, thread_next_steps: [], status: 'new',
+  web_link: account_id === 'm-work' ? `https://outlook.office.com/mail/deeplink/read/${id}` : null, ...extra,
 });
 const MESSAGES: EmailMessage[] = [
   mail('e1', 'm-gmail', 'Acme Insurance', 'Your policy renews November 1', 2, 'action_needed', 3, 'Renewal notice: confirm coverage and pay $412 by Nov 1 to avoid a lapse.', 'a-fin',

@@ -37,7 +37,7 @@ export class GmailProvider implements MailProvider {
     const after = Math.floor(new Date(sinceISO).getTime() / 1000);
     const list = await this.call<{ messages?: { id: string }[] }>(`/messages?maxResults=${max}&q=${encodeURIComponent(`in:inbox after:${after}`)}`);
     const ids = (list.messages ?? []).map((m) => m.id);
-    const meta = 'format=metadata&metadataHeaders=From&metadataHeaders=Subject';
+    const meta = 'format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID';
     const msgs = await Promise.all(ids.map((id) => this.call<GMessage>(`/messages/${id}?${meta}`)));
     return msgs.map((m) => {
       const h = (n: string) => m.payload.headers?.find((x) => x.name.toLowerCase() === n)?.value ?? null;
@@ -52,6 +52,7 @@ export class GmailProvider implements MailProvider {
         received_at: new Date(Number(m.internalDate)).toISOString(),
         is_unread: (m.labelIds ?? []).includes('UNREAD'),
         labels: (m.labelIds ?? []).filter((l) => !l.startsWith('CATEGORY_') && l !== 'UNREAD'),
+        message_id_header: clip(h('message-id'), 500),
       };
     });
   }

@@ -8,6 +8,8 @@ import { handoffToDrafts, draftsToCommit, HandoffItem, type HandoffInterpretatio
 import { recommend, KIND_LABEL } from '../../app/src/core/recommend';
 import type { Action, Goal, LifeArea } from '../../app/src/core/types';
 import { crunch, projectHealth, staleTasks } from '../../app/src/core/workload';
+import { emailLink, oneLine, scoreEmail, type BriefAccount, type BriefMessage } from '../../app/src/core/emailBrief';
+import { BriefingInput, modifyMessages, personToday, saveChatBriefing, threadTextFor } from './email/service';
 import type { Env } from './env';
 import { commitCapture, must, type Ctx } from './ops';
 import { autoOrganize } from './organize';
@@ -64,6 +66,7 @@ const itemSchema = {
     minutes: { type: 'integer', minimum: 1, maximum: 600, description: 'Estimated minutes for a task' },
     area: { type: 'string', maxLength: 60, description: 'One of their life areas (see get_overview), e.g. "Home"' },
     project: { type: 'string', maxLength: 200, description: 'For tasks/done/notes: the title or id of an existing project it belongs to' },
+    from_email: { type: 'string', description: 'For items that came from an email: its id from get_inbox, so the task links back to it' },
     steps: { type: 'array', maxItems: 5, description: 'For projects: the first 2–5 small steps', items: { type: 'object', required: ['title'], properties: { title: { type: 'string', maxLength: 200 }, minutes: { type: 'integer', minimum: 1, maximum: 600 } } } },
   },
 };
@@ -138,6 +141,45 @@ const TOOLS = [
     inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
+  {
+    name: 'get_inbox',
+    title: 'Read their inbox',
+    description: "Recent email from every inbox they connected to Momentum: sender, subject, a preview, Momentum's category and its rule-based priority (score and why), plus a link that opens each email in their mail app. Also returns today's briefing if one exists. Use this when they ask what's in their email or what to answer first.",
+    inputSchema: { type: 'object', properties: {
+      days: { type: 'integer', minimum: 1, maximum: 7, description: 'How far back to look (default 2)' },
+      include_low_priority: { type: 'boolean', description: 'Include newsletters, promotions and receipts (default false)' },
+    } },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'read_email_thread',
+    title: 'Read a whole email conversation',
+    description: 'The full text of one conversation (fetched from their mail provider on request, not stored). Use it for emails that look important before summarizing them.',
+    inputSchema: { type: 'object', required: ['message_id'], properties: { message_id: { type: 'string', description: 'An id from get_inbox' } } },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  {
+    name: 'save_email_briefing',
+    title: 'Save the inbox briefing',
+    description: 'Saves your briefing into Momentum, where it shows at the top of their Inbox and on Today: a cohesive summary written to them (a short paragraph, not a list: what needs them, most urgent first, who they are waiting on, what can wait), and the emails to do first in order, each with a one-line reason. Optionally a better one-line summary per email. Replaces today\'s earlier briefing.',
+    inputSchema: { type: 'object', required: ['summary', 'do_first'], properties: {
+      summary: { type: 'string', maxLength: 1500 },
+      do_first: { type: 'array', maxItems: 10, items: { type: 'object', required: ['message_id', 'why'], properties: { message_id: { type: 'string' }, why: { type: 'string', maxLength: 200 } } } },
+      message_notes: { type: 'array', maxItems: 40, items: { type: 'object', required: ['message_id', 'summary'], properties: { message_id: { type: 'string' }, summary: { type: 'string', maxLength: 300 } } } },
+    } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'email_action',
+    title: 'Archive, mark read or label emails',
+    description: 'Archives, marks as read, or labels emails in their real mailbox. Only when they ask for it.',
+    inputSchema: { type: 'object', required: ['message_ids', 'action'], properties: {
+      message_ids: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string' } },
+      action: { type: 'string', enum: ['archive', 'mark_read', 'label'] },
+      label: { type: 'string', maxLength: 60 },
+    } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
 ];
 
 const INSTRUCTIONS = [
@@ -147,6 +189,7 @@ const INSTRUCTIONS = [
   'When the plan feels right, call send_plan once with everything. It waits for their review in the app, so it is safe to be generous.',
   'Use add_task / create_project only for a single thing they clearly asked to add now.',
   'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
+  'Email: for "what is in my email" or "what should I answer first", call get_inbox, read the threads that matter with read_email_thread, then save_email_briefing with a cohesive paragraph and a ranked do_first list, and tell them the same. Offer send_plan (with from_email) to turn emails into tasks. Archive or label only when asked.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
 
@@ -339,6 +382,40 @@ async function completeTask(ctx: Ctx, id: string) {
 /** A problem the chat can fix (bad id, unknown area): returned as a tool error, not a protocol error. */
 class ToolError extends Error {}
 
+const InboxInput = z.object({ days: z.number().int().min(1).max(7).default(2), include_low_priority: z.boolean().default(false) });
+const ThreadIdInput = z.object({ message_id: z.string().uuid() });
+const EmailActionInput = z.object({ message_ids: z.array(z.string().uuid()).min(1).max(50), action: z.enum(['archive', 'mark_read', 'label']), label: z.string().trim().min(1).max(60).optional() });
+
+async function inbox(ctx: Ctx, input: z.infer<typeof InboxInput>) {
+  const [accounts, msgs, projects] = await Promise.all([
+    must(ctx.db.from('email_accounts').select('id,provider,email_address,display_name,status')),
+    must(ctx.db.from('email_messages').select('id,account_id,provider_message_id,thread_id,from_name,from_address,subject,snippet,summary,received_at,is_unread,is_archived,category,importance,status,web_link,message_id_header')
+      .eq('is_archived', false).gte('received_at', new Date(Date.now() - input.days * 86_400_000).toISOString()).order('received_at', { ascending: false }).limit(80)),
+    must(ctx.db.from('goals').select('id,title').in('status', ['active', 'waiting', 'blocked'])),
+  ]);
+  const accts = accounts as (BriefAccount & { display_name: string | null; status: string })[];
+  if (!accts.length) return { connected: false, message: 'No inbox is connected to Momentum yet. They can add one in Momentum: Settings, Email Accounts.' };
+  const today = await personToday(ctx.db, ctx.userId);
+  const { data: briefing } = await ctx.db.from('email_digests').select('summary,do_first,source,author,updated_at').eq('digest_date', today).maybeSingle();
+  const low = new Set(['newsletter', 'promotion', 'receipt']);
+  const list = (msgs as BriefMessage[]).filter((m) => input.include_low_priority || !low.has(m.category ?? ''));
+  return {
+    connected: true,
+    inboxes: accts.map((a) => ({ address: a.email_address, provider: a.provider, name: a.display_name, status: a.status })),
+    todays_briefing: briefing ?? null,
+    hidden_low_priority: (msgs as BriefMessage[]).length - list.length,
+    emails: list.map((m) => {
+      const s = scoreEmail(m, projects as { id: string; title: string }[]);
+      const account = accts.find((a) => a.id === m.account_id);
+      return {
+        id: m.id, inbox: account?.email_address, from: [m.from_name, m.from_address].filter(Boolean).join(' '), subject: m.subject,
+        preview: (m.snippet ?? '').slice(0, 400), gist: oneLine(m), received: m.received_at, unread: m.is_unread, category: m.category,
+        rules_priority: s.score, rules_why: s.why || null, open_link: emailLink(m, account)?.url ?? null,
+      };
+    }).sort((a, b) => b.rules_priority - a.rules_priority),
+  };
+}
+
 function issues(e: z.ZodError) {
   return e.issues.slice(0, 4).map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
 }
@@ -357,6 +434,18 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
     case 'create_project': return addNow(ctx, { ...parse(HandoffItem.omit({ kind: true, project: true, minutes: true }), args), kind: 'project' });
     case 'update_task': return updateTask(ctx, parse(UpdateInput, args));
     case 'complete_task': return completeTask(ctx, parse(IdInput, args).id);
+    case 'get_inbox': return inbox(ctx, parse(InboxInput, args));
+    case 'read_email_thread': {
+      const t = await threadTextFor(ctx.env, ctx.db, parse(ThreadIdInput, args).message_id).catch((e) => { throw new ToolError(e instanceof HttpError && e.code === 'not_found' ? 'No email with that id. Use ids from get_inbox.' : 'Could not reach that mailbox right now.'); });
+      return t;
+    }
+    case 'save_email_briefing': return { ...(await saveChatBriefing(ctx.db, ctx.userId, parse(BriefingInput, args), client)), message: 'Saved. It shows at the top of their Inbox and on Today.' };
+    case 'email_action': {
+      const a = parse(EmailActionInput, args);
+      if (a.action === 'label' && !a.label) throw new ToolError('Give a label name.');
+      await modifyMessages(ctx.env, ctx.db, ctx.userId, { message_ids: a.message_ids, op: a.action, label: a.label });
+      return { status: 'done', action: a.action, count: a.message_ids.length };
+    }
     default: throw new RpcError(-32602, `Unknown tool: ${name}`);
   }
 }

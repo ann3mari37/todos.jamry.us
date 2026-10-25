@@ -68,3 +68,10 @@ export function greeting(now: Date = new Date()): string {
   if (h < 17) return 'Good afternoon!';
   return 'Good evening!';
 }
+
+/** The calendar date (YYYY-MM-DD) in a time zone, offset by `days`. Falls back to UTC for an unknown zone. */
+export function localDateIn(tz: string | null | undefined, days = 0, now: Date = new Date()): string {
+  const d = new Date(now.getTime() + days * 86_400_000);
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
+  catch { return d.toISOString().slice(0, 10); }
+}

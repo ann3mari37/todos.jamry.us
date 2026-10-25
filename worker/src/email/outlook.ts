@@ -15,6 +15,8 @@ interface GraphMessage {
   isRead: boolean;
   categories: string[];
   body?: { contentType: string; content: string };
+  webLink?: string;
+  internetMessageId?: string;
 }
 
 export class OutlookProvider implements MailProvider {
@@ -35,7 +37,7 @@ export class OutlookProvider implements MailProvider {
       $filter: `receivedDateTime ge ${new Date(sinceISO).toISOString()}`,
       $orderby: 'receivedDateTime desc',
       $top: String(max),
-      $select: 'id,conversationId,subject,from,receivedDateTime,bodyPreview,isRead,categories',
+      $select: 'id,conversationId,subject,from,receivedDateTime,bodyPreview,isRead,categories,webLink,internetMessageId',
     });
     const { value } = await this.call<{ value: GraphMessage[] }>(`/mailFolders/inbox/messages?${q}`);
     return value.map((m) => ({
@@ -48,6 +50,8 @@ export class OutlookProvider implements MailProvider {
       received_at: m.receivedDateTime,
       is_unread: !m.isRead,
       labels: m.categories ?? [],
+      web_link: clip(m.webLink ?? null, 2000),
+      message_id_header: clip(m.internetMessageId ?? null, 500),
     }));
   }
 

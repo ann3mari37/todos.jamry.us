@@ -11,6 +11,10 @@ export interface MailMessage {
   received_at: string; // ISO
   is_unread: boolean;
   labels: string[];
+  /** The provider's own web link to this message, when it has one (Outlook). */
+  web_link?: string | null;
+  /** RFC Message-ID, used to open the message in a mail app or find it by search. */
+  message_id_header?: string | null;
 }
 
 export interface MailRef {

@@ -3,7 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { DigestCard } from '../../src/components/EmailBits';
+import { InboxBriefing } from '../../src/components/EmailBits';
 import { Flower } from '../../src/components/Flower';
 import { FlowerArt } from '../../src/components/FlowerArt';
 import { EditTask } from '../../src/components/EditTask';
@@ -40,9 +40,9 @@ export default function Today() {
   const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.kind, plan.byKind(f.kind).length])) as Record<RecommendationKind, number>,
     [plan.byKind]); // eslint-disable-line react-hooks/exhaustive-deps
   const shownPicks = filter ? plan.byKind(filter).filter((x) => !skipped.has(x.action?.id ?? x.goal?.id ?? '')) : plan.picks;
-  const next = (x: (typeof shownPicks)[number]) => {
+  const next = (x: (typeof shownPicks)[number], dir: 1 | -1 = 1) => {
     if (filter) setSkipped((s) => new Set(s).add(x.action?.id ?? x.goal?.id ?? ''));
-    else if (!plan.swap(x.pick)) setNote("That's everything that's ready right now.");
+    else if (!plan.browse(x.pick, dir)) setNote("That's the only one of its kind right now.");
   };
   const [organizing, setOrganizing] = useState(false);
   const [ringInfo, setRingInfo] = useState(false);
@@ -104,8 +104,8 @@ export default function Today() {
   const respond = async (pick: Pick, response: 'deferred' | 'not_suitable' | 'show_other') => {
     setSelected(null);
     await store.giveFeedback({ action_id: pick.action_id, goal_id: pick.goal_id, response });
-    if (response === 'deferred') plan.remove(pick);
-    else if (!plan.swap(pick)) setNote("That's everything that's ready right now.");
+    if (response === 'deferred' || response === 'not_suitable') plan.notToday(pick);
+    else if (!plan.browse(pick, 1)) setNote("That's the only one of its kind right now.");
   };
 
   return (
@@ -181,20 +181,13 @@ export default function Today() {
             </Card>
           )}
 
-          {store.emailDigest && (
-            <Pressable onPress={() => router.push('/inbox')} accessibilityRole="button" accessibilityLabel="Open inbox">
-              <DigestCard digest={store.emailDigest} compact />
-              {inboxAction > 0 && <Muted style={{ textAlign: 'right', marginTop: 6, marginBottom: 6, color: colors.pinkDeep, fontFamily: fonts.medium }}>{inboxAction} email{inboxAction === 1 ? '' : 's'} need you · Open inbox ›</Muted>}
-            </Pressable>
-          )}
-          {!store.emailDigest && store.emailAccounts.length > 0 && (
-            <Card onPress={() => router.push('/inbox')} style={{ paddingVertical: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Icon name="mail" size={18} color={colors.pink} />
-                <Body style={{ flex: 1 }}>Inbox{inboxAction ? ` · ${inboxAction} need${inboxAction === 1 ? 's' : ''} you` : ''}</Body>
-                <Icon name="chevron-right" size={16} color={colors.textFaint} />
-              </View>
-            </Card>
+          {store.emailAccounts.length > 0 && (
+            <>
+              <InboxBriefing compact onOpen={() => router.push('/inbox')} />
+              <Pressable onPress={() => router.push('/inbox')} accessibilityRole="button" style={{ alignSelf: 'flex-end', paddingVertical: 8 }}>
+                <Muted style={{ color: colors.pinkDeep, fontFamily: fonts.medium }}>{inboxAction > 0 ? `${inboxAction} email${inboxAction === 1 ? '' : 's'} need you · ` : ''}Open inbox ›</Muted>
+              </Pressable>
+            </>
           )}
 
           {loose.length >= 3 && (
@@ -281,11 +274,23 @@ export default function Today() {
                   </View>
                 </View>
               </Card>
-              <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={pick.kind === 'next_up' ? 'Something else' : `Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8}
+              {/* Card controls sit on top of the card (buttons inside the card's button are invalid on the web). */}
+              {filter ? (
+                <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel="Next suggestion" hitSlop={8}
                   style={{ position: 'absolute', left: 72, bottom: 28, flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 28 }}>
-                  <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>{pick.kind === 'next_up' ? 'Something else' : `Next ${KIND_LABEL[pick.kind].toLowerCase()}`}</Text>
+                  <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>Next</Text>
                   <Icon name="chevron-right" size={13} color={colors.textMuted} />
                 </Pressable>
+              ) : (
+                <CardControls
+                  position={plan.position(pick)}
+                  onBack={() => next({ pick, action, goal }, -1)}
+                  onNext={() => next({ pick, action, goal }, 1)}
+                  onSeeAll={() => { setFilter(pick.kind); setSkipped(new Set()); setNote(null); }}
+                  onNotToday={() => respond(pick, 'deferred')}
+                  kindLabel={KIND_LABEL[pick.kind]}
+                />
+              )}
               </View>
             );
           })}
@@ -512,5 +517,26 @@ function CrunchSheet({ visible, load, onClose }: { visible: boolean; load: Crunc
       )}
       <Button title="Done" onPress={onClose} style={{ marginTop: 10 }} />
     </Sheet>
+  );
+}
+
+/** Back / Next through a card's category ("2 of 5", wraps around), See all of it, or set this one aside for today. */
+function CardControls({ position, onBack, onNext, onSeeAll, onNotToday, kindLabel }: {
+  position: { index: number; total: number }; onBack: () => void; onNext: () => void; onSeeAll: () => void; onNotToday: () => void; kindLabel: string;
+}) {
+  const link = { fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted } as const;
+  const many = position.total > 1;
+  return (
+    <View style={{ position: 'absolute', left: 72, right: 16, bottom: 26, flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 28 }}>
+      {many && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={`Previous ${kindLabel}`} hitSlop={8}><Icon name="chevron-left" size={16} color={colors.textMuted} /></Pressable>
+          <Text style={link}>{position.index + 1} of {position.total}</Text>
+          <Pressable onPress={onNext} accessibilityRole="button" accessibilityLabel={`Next ${kindLabel}`} hitSlop={8}><Icon name="chevron-right" size={16} color={colors.textMuted} /></Pressable>
+        </View>
+      )}
+      {many && <Pressable onPress={onSeeAll} accessibilityRole="button" accessibilityLabel={`See all ${kindLabel}`} hitSlop={6}><Text style={link}>See all</Text></Pressable>}
+      <Pressable onPress={onNotToday} accessibilityRole="button" accessibilityLabel="Not today" hitSlop={6}><Text style={link}>Not today</Text></Pressable>
+    </View>
   );
 }

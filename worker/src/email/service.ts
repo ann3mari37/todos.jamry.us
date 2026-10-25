@@ -4,7 +4,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { EmailDigestOutput, EmailThreadOutput, EmailTriageOutput } from '../../../app/src/core/ai-contracts';
-import { toISODate } from '../../../app/src/core/dates';
+import { localDateIn } from '../../../app/src/core/dates';
+import { rulesBriefing } from '../../../app/src/core/emailBrief';
 import type { Env } from '../env';
 import { callStructured } from '../ai';
 import { triageEmail } from '../../../app/src/core/rules';
@@ -62,8 +63,11 @@ export async function syncAccounts(env: Env, db: SupabaseClient, userId: string,
     try {
       const msgs = await withProvider(env, a, (p) => p.listRecent(since, 40));
       if (msgs.length) {
+        // Gmail links are built from the message id and the account address; Outlook sends its own webLink.
+        const link = (m: (typeof msgs)[number]) => m.web_link
+          ?? (a.provider === 'gmail' ? `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(a.email_address)}#all/${m.provider_message_id}` : null);
         const { error } = await db.from('email_messages').upsert(
-          msgs.map((m) => ({ ...m, user_id: userId, account_id: a.id })),
+          msgs.map((m) => ({ ...m, web_link: link(m), user_id: userId, account_id: a.id })),
           { onConflict: 'account_id,provider_message_id' },
         );
         if (error) throw new HttpError(400, 'db_error', error.message);
@@ -167,25 +171,33 @@ export async function triageWithRules(db: SupabaseClient, userId: string, limit 
 // ───────────────────────── digest
 export const DigestInput = z.object({ regenerate: z.boolean().default(false) });
 
+/** Today's date for this person, from the time zone the app saved on their profile. */
+export async function personToday(db: SupabaseClient, userId: string, days = 0): Promise<string> {
+  const { data } = await db.from('profiles').select('timezone').eq('id', userId).maybeSingle();
+  return localDateIn((data as { timezone?: string } | null)?.timezone, days);
+}
+
 export async function buildDigest(env: Env, db: SupabaseClient, userId: string, input: z.infer<typeof DigestInput>, aiEnabled = true) {
-  const today = toISODate(new Date());
-  if (!input.regenerate) {
-    const { data } = await db.from('email_digests').select('*').eq('user_id', userId).eq('digest_date', today).maybeSingle();
-    if (data) return data;
-  }
+  const today = await personToday(db, userId);
+  const { data: existing } = await db.from('email_digests').select('*').eq('user_id', userId).eq('digest_date', today).maybeSingle();
+  // A briefing the person's own AI chat wrote is never replaced automatically; only a new one from the chat replaces it.
+  if (existing && (!input.regenerate || (existing as { source?: string }).source === 'chat')) return existing;
   const enabled = await rows<{ id: string }>(db.from('email_accounts').select('id').eq('user_id', userId).eq('digest_enabled', true));
   if (!enabled.length) return null;
   const msgs = await rows<Msg>(
-    db.from('email_messages').select('id,account_id,provider_message_id,thread_id,from_name,from_address,subject,snippet,received_at,category,importance,summary')
+    db.from('email_messages').select('id,account_id,provider_message_id,thread_id,from_name,from_address,subject,snippet,received_at,category,importance,summary,is_unread,status')
       .eq('user_id', userId).in('account_id', enabled.map((a) => a.id)).eq('is_archived', false)
       .gte('received_at', new Date(Date.now() - DAY).toISOString())
       .order('importance', { ascending: false }).order('received_at', { ascending: false }).limit(60),
   );
-  const counts: Record<string, number> = { total: msgs.length };
-  for (const m of msgs) counts[m.category ?? 'other'] = (counts[m.category ?? 'other'] ?? 0) + 1;
-
-  let summary = msgs.length ? `${msgs.length} new email${msgs.length === 1 ? '' : 's'} in the last day${counts.action_needed ? `, ${counts.action_needed} needing a reply or action` : ''}.` : 'Nothing new in your inbox since yesterday.';
-  let highlights: { message_id: string; text: string }[] = msgs.filter((m) => (m.importance ?? 0) >= 3).slice(0, 5).map((m) => ({ message_id: m.id, text: m.summary ?? m.subject ?? '' }));
+  // Rules first (always works, no AI): a cohesive summary and a ranked "do first" list.
+  const projects = await rows<{ id: string; title: string }>(db.from('goals').select('id,title').eq('user_id', userId).in('status', ['active', 'waiting', 'blocked']).limit(60));
+  const brief = rulesBriefing(msgs as never, projects);
+  const counts = brief.counts;
+  let summary = brief.summary;
+  let doFirstList = brief.do_first;
+  let source: 'rules' | 'ai' = 'rules';
+  let highlights: { message_id: string; text: string }[] = doFirstList.map((d) => ({ message_id: d.message_id, text: d.why }));
   if (aiEnabled && msgs.length) {
     try {
       const out = await callStructured(env, {
@@ -201,10 +213,12 @@ export async function buildDigest(env: Env, db: SupabaseClient, userId: string, 
       const ids = new Set(msgs.map((m) => m.id));
       summary = out.summary;
       highlights = out.highlights.filter((h) => ids.has(h.message_id));
-    } catch { /* deterministic digest still useful */ }
+      doFirstList = highlights.map((h) => ({ message_id: h.message_id, why: h.text }));
+      source = 'ai';
+    } catch { /* the rules briefing stands */ }
   }
   const { data, error } = await db.from('email_digests')
-    .upsert({ user_id: userId, digest_date: today, summary, highlights, counts }, { onConflict: 'user_id,digest_date' })
+    .upsert({ user_id: userId, digest_date: today, summary, highlights, counts, do_first: doFirstList, source, author: null, updated_at: new Date().toISOString() }, { onConflict: 'user_id,digest_date' })
     .select('*').single();
   if (error) throw new HttpError(400, 'db_error', error.message);
   return data;
@@ -270,4 +284,47 @@ export async function modifyMessages(env: Env, db: SupabaseClient, userId: strin
   }
   if (failed.length === accounts.length && accounts.length) throw new HttpError(502, 'mailbox_unavailable');
   return { ok: true, failed_accounts: failed };
+}
+
+// ───────────────────────── for the AI-chat connector: the person's own AI reads mail and writes the briefing
+
+/** Plain text of a conversation (no AI involved), for the person's own AI to read. */
+export async function threadTextFor(env: Env, db: SupabaseClient, messageId: string, maxChars = 12_000) {
+  const { data: msg } = await db.from('email_messages').select('id,account_id,provider_message_id,thread_id,subject').eq('id', messageId).maybeSingle();
+  if (!msg) throw new HttpError(404, 'not_found');
+  const { data: account } = await db.from('email_accounts').select('*').eq('id', msg.account_id).single();
+  const text = await withProvider(env, account as Account, (p) => p.threadText(msg, maxChars));
+  return { subject: msg.subject as string | null, inbox: (account as Account).email_address, text };
+}
+
+export const BriefingInput = z.object({
+  summary: z.string().trim().min(1).max(1500),
+  do_first: z.array(z.object({ message_id: z.string().uuid(), why: z.string().trim().min(1).max(200) })).max(10).default([]),
+  message_notes: z.array(z.object({ message_id: z.string().uuid(), summary: z.string().trim().min(1).max(300) })).max(40).default([]),
+});
+
+/**
+ * Saves a briefing written by the person's AI chat as today's digest (source "chat"). It shows at the top of Inbox and on
+ * Today until the chat writes a new one. Optional one-line notes replace Momentum's own per-email summaries.
+ */
+export async function saveChatBriefing(db: SupabaseClient, userId: string, input: z.infer<typeof BriefingInput>, author: string | null) {
+  const today = await personToday(db, userId);
+  const ids = [...new Set([...input.do_first.map((d) => d.message_id), ...input.message_notes.map((n) => n.message_id)])];
+  const known = ids.length ? await rows<{ id: string }>(db.from('email_messages').select('id').eq('user_id', userId).in('id', ids)) : [];
+  const ok = new Set(known.map((k) => k.id));
+  const doFirstList = input.do_first.filter((d) => ok.has(d.message_id));
+  for (const n of input.message_notes.filter((x) => ok.has(x.message_id))) {
+    await db.from('email_messages').update({ summary: n.summary }).eq('id', n.message_id);
+  }
+  const recent = await rows<{ category: string | null }>(db.from('email_messages').select('category').eq('user_id', userId).eq('is_archived', false)
+    .gte('received_at', new Date(Date.now() - DAY).toISOString()));
+  const counts: Record<string, number> = { total: recent.length };
+  for (const m of recent) counts[m.category ?? 'other'] = (counts[m.category ?? 'other'] ?? 0) + 1;
+  const { error } = await db.from('email_digests').upsert({
+    user_id: userId, digest_date: today, summary: input.summary, do_first: doFirstList,
+    highlights: doFirstList.map((d) => ({ message_id: d.message_id, text: d.why })), counts,
+    source: 'chat', author, updated_at: new Date().toISOString(),
+  }, { onConflict: 'user_id,digest_date' });
+  if (error) throw new HttpError(400, 'db_error', error.message);
+  return { saved: true, do_first: doFirstList.length, skipped_unknown_ids: input.do_first.length - doFirstList.length };
 }
