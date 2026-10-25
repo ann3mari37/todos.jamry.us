@@ -14,8 +14,8 @@ directory = "../app/dist"
 binding = "ASSETS"
 # Deep links (/project/123, /inbox…) load the app, which routes them in the browser.
 not_found_handling = "single-page-application"
-# API requests always reach the Worker code, never the app files.
-run_worker_first = ["/api/*"]
+# API requests and the AI-chat connector's sign-in discovery always reach the Worker code, never the app files.
+run_worker_first = ["/api/*", "/.well-known/oauth-*"]
 
 [triggers]
 crons = ["17 13 * * *"] # daily, 13:17 UTC

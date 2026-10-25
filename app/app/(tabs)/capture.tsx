@@ -27,7 +27,7 @@ const blank = (p: Partial<Draft>): Draft => ({
 });
 
 export default function Capture() {
-  const params = useLocalSearchParams<{ mode?: string; goal?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; goal?: string; handoff?: string }>();
   const mode: Mode = params.mode === 'did' ? 'did' : params.mode === 'goal' ? 'goal' : 'any';
   const store = useStore();
   const [text, setText] = useState('');
@@ -37,12 +37,25 @@ export default function Capture() {
   const [notice, setNotice] = useState<string | null>(null);
   const [questions, setQuestions] = useState<string[]>([]);
   const [editing, setEditing] = useState<Draft | null>(null);
-  const [source, setSource] = useState<'text' | 'voice'>('text');
+  const [source, setSource] = useState<'text' | 'voice' | 'chat'>('text');
+  // A plan sent from an AI chat, opened from Today's "From chat" card (?handoff=<id>).
+  const handoff = params.handoff ? store.handoffs.find((h) => h.id === params.handoff) ?? null : null;
 
   const reset = useCallback(() => {
-    setText(''); setDrafts(null); setCaptureId(null); setNotice(null); setQuestions([]);
+    setText(''); setDrafts(null); setCaptureId(null); setNotice(null); setQuestions([]); setSource('text');
   }, []);
-  useEffect(reset, [params.mode, params.goal, reset]);
+  useEffect(reset, [params.mode, params.goal, params.handoff, reset]);
+  useEffect(() => {
+    if (!params.handoff || captureId === params.handoff) return;
+    if (handoff) {
+      setText(handoff.raw_text);
+      setSource('chat');
+      setCaptureId(handoff.id);
+      setDrafts(handoff.interpretation.items.map((i) => blank({ ...i, meaning: i.meaning ?? '' })));
+    } else if (!store.loading) {
+      setNotice('That plan from chat was already reviewed, or it is no longer here.');
+    }
+  }, [params.handoff, handoff, captureId, store.loading]);
 
   const speech = useSpeech(useCallback((t: string) => { setSource('voice'); setText((prev) => (prev ? `${prev} ${t}` : t)); }, []));
 
@@ -79,8 +92,10 @@ export default function Capture() {
         ...(d.kind === 'goal' && d.meaning.trim() ? { meaning: d.meaning.trim() } : {}),
       }));
       if (items.length) await store.commitCapture(text, mode === 'did' ? 'accomplishment' : source, captureId, items);
+      else if (source === 'chat' && captureId) await store.dismissHandoff(captureId); // everything was removed during review
       const n = drafts.length;
       reset();
+      if (params.handoff) router.setParams({ handoff: undefined });
       if (mode === 'did' || drafts.every((d) => d.kind === 'accomplishment')) router.push({ pathname: '/celebrate', params: { count: String(n) } });
       else router.navigate(params.goal ? { pathname: '/project/[id]', params: { id: params.goal } } : '/today');
     } catch (e) {
@@ -98,15 +113,23 @@ export default function Capture() {
     setEditing(d);
   };
 
-  const title = mode === 'did' ? 'Look what you did!' : mode === 'goal' ? 'What would you like to achieve?' : "What's on your mind?";
-  const subtitle = mode === 'did'
+  const title = source === 'chat' ? 'Your plan from chat' : mode === 'did' ? 'Look what you did!' : mode === 'goal' ? 'What would you like to achieve?' : "What's on your mind?";
+  const subtitle = source === 'chat'
+    ? 'Here’s what you worked out together. Keep what helps, change anything, and add it to your plan.'
+    : mode === 'did'
     ? 'List anything you got done — planned or not. It all counts.'
     : mode === 'goal' ? 'Describe the outcome. You don’t need a plan — we’ll find a first step.'
     : 'Add anything — a goal, a task, an idea, or something you already got done.';
 
   return (
     <Screen>
-      <Pressable onPress={() => (drafts ? reset() : router.canGoBack() ? router.back() : router.navigate('/today'))} accessibilityRole="button" style={{ paddingVertical: 12, alignSelf: 'flex-start' }}>
+      <Pressable onPress={() => {
+        // Leaving a chat plan keeps it waiting on Today for later.
+        if (source === 'chat') { reset(); router.setParams({ handoff: undefined }); router.navigate('/today'); }
+        else if (drafts) reset();
+        else if (router.canGoBack()) router.back();
+        else router.navigate('/today');
+      }} accessibilityRole="button" style={{ paddingVertical: 12, alignSelf: 'flex-start' }}>
         <Body style={{ fontFamily: fonts.medium }}>Cancel</Body>
       </Pressable>
       <H1>{title}</H1>
@@ -156,13 +179,20 @@ export default function Capture() {
           </View>
           {notice && <Banner tone="soft" text={notice} />}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 8 }}>
-            <Icon name="star" size={14} color={colors.pink} />
-            <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep }}>Here's how I organized it — tap Edit to change anything.</Text>
+            <Icon name={source === 'chat' ? 'message-circle' : 'star'} size={14} color={colors.pink} />
+            <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep, flex: 1 }}>
+              {source === 'chat'
+                ? `From your chat${handoff?.interpretation.client ? ` with ${handoff.interpretation.client}` : ''}. Nothing is added until you save. Tap Edit to change anything.`
+                : "Here's how I organized it — tap Edit to change anything."}
+            </Text>
           </View>
           {questions.map((q) => <Banner key={q} text={q} />)}
           {drafts.map((d) => <ReviewRow key={d.client_id} d={d} onEdit={() => setEditing(d)} />)}
           <Button title="Add another item" variant="ghost" icon="plus" onPress={addManual} />
           <Button title={mode === 'did' ? 'Save to my history' : 'Add to My Plan'} onPress={save} loading={saving} disabled={!drafts.length || drafts.some((d) => !d.title.trim())} style={{ marginTop: 8 }} />
+          {source === 'chat' && captureId && (
+            <Button title="Not now — discard this plan" variant="ghost" onPress={async () => { await store.dismissHandoff(captureId); reset(); router.setParams({ handoff: undefined }); router.navigate('/today'); }} />
+          )}
         </>
       )}
 

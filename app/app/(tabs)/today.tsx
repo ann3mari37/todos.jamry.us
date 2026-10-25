@@ -88,6 +88,7 @@ export default function Today() {
       </View>
 
       {!store.online && <Banner tone="soft" text={`You're offline. Changes are saved on this device${store.pending ? ` (${store.pending} waiting to sync)` : ''}.`} />}
+      <FromChat />
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 18 }}>
         <Ring value={todayAcc.length} label={todayAcc.length === 1 ? 'accomplishment today' : 'accomplishments today'} size={120} from={colors.pink} to={colors.teal} emphasis />
@@ -327,5 +328,32 @@ function FilterRow({ value, counts, onChange }: { value: RecommendationKind | nu
       {FILTERS.filter((f) => counts[f.kind] > 0).map((f) =>
         chip(f.kind, `${f.label} · ${counts[f.kind]}`, value === f.kind, () => onChange(value === f.kind ? null : f.kind), KIND_STYLE[f.kind].color))}
     </ScrollView>
+  );
+}
+
+/** Plans an AI chat handed off through the Momentum connector, waiting for review. */
+function FromChat() {
+  const store = useStore();
+  if (!store.handoffs.length) return null;
+  return (
+    <>
+      {store.handoffs.slice(0, 3).map((h) => {
+        const n = h.interpretation.items.length;
+        const who = h.interpretation.client ?? 'your AI chat';
+        return (
+          <Card key={h.id} onPress={() => router.push({ pathname: '/capture', params: { handoff: h.id } })} accessibilityLabel={`Review the plan from ${who}`}
+            style={{ backgroundColor: colors.lavenderSoft, borderColor: colors.lavenderSoft, paddingVertical: 14, marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <IconCircle name="message-circle" color={colors.lavender} soft={colors.white} size={40} />
+              <View style={{ flex: 1 }}>
+                <Body style={{ fontFamily: fonts.medium }}>From {who}: {n} item{n === 1 ? '' : 's'} to review</Body>
+                <Muted numberOfLines={2}>{h.interpretation.summary || h.raw_text}</Muted>
+              </View>
+              <Icon name="chevron-right" color={colors.textMuted} />
+            </View>
+          </Card>
+        );
+      })}
+    </>
   );
 }

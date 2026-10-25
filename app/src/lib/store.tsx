@@ -4,6 +4,7 @@ import * as Crypto from 'expo-crypto';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Platform } from 'react-native';
 import type { CommitItem, EmailCategory, EmailStep } from '../core/ai-contracts';
+import type { HandoffInterpretation } from '../core/handoff';
 import { DEMO, demo, demoSession } from './demo';
 import type { Accomplishment, Action, Dependency, FeedbackEntry, Goal, LifeArea } from '../core/types';
 import { api, ApiError } from './api';
@@ -21,7 +22,13 @@ export interface Profile {
   learned_preferences: Record<string, unknown>;
   auto_organize?: boolean;
   email_digest_enabled?: boolean;
+  /** null until the welcome walkthrough is finished or skipped (undefined before that migration). */
+  onboarded_at?: string | null;
 }
+/** A plan an AI chat sent through the Momentum connector, waiting for review. */
+export interface Handoff { id: string; raw_text: string; interpretation: HandoffInterpretation; created_at: string }
+/** An AI app the user allowed to reach Momentum (Supabase OAuth grant). */
+export interface ChatConnection { client_id: string; name: string; uri: string | null; granted_at: string }
 export interface EmailAccount {
   id: string; provider: 'gmail' | 'outlook' | 'imap'; email_address: string; display_name: string | null; color: string;
   life_area_id: string | null; digest_enabled: boolean; status: 'active' | 'needs_reauth' | 'error'; error_code: string | null; last_synced_at: string | null;
@@ -63,12 +70,13 @@ export interface Snapshot {
   emailMessages: EmailMessage[];
   emailDigest: EmailDigest | null;
   organizeRuns: OrganizeRun[];
+  handoffs: Handoff[];
 }
 
 const EMPTY: Snapshot = {
   profile: null, lifeAreas: [], goals: [], actions: [], dependencies: [], accomplishments: [], events: [],
   feedback: [], nudges: [], reflections: [], accountability: null, notifications: null,
-  emailAccounts: [], emailMessages: [], emailDigest: null, organizeRuns: [],
+  emailAccounts: [], emailMessages: [], emailDigest: null, organizeRuns: [], handoffs: [],
 };
 
 type OutboxOp =
@@ -212,19 +220,21 @@ function useStoreValue() {
         check(supabase.from('notification_preferences').select('*').maybeSingle()),
       ]);
       const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
-      const [emailAccounts, emailMessages, emailDigest, organizeRuns] = await Promise.all([
+      const [emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs] = await Promise.all([
         soft(supabase.from('email_accounts').select('*').order('created_at'), [] as EmailAccount[]),
         soft(supabase.from('email_messages').select('id,account_id,thread_id,from_name,from_address,subject,snippet,received_at,is_unread,is_archived,labels,category,importance,summary,life_area_id,suggested_goal_id,suggested_actions,thread_summary,thread_next_steps,status')
           .eq('is_archived', false).gte('received_at', weekAgo).order('received_at', { ascending: false }).limit(200), [] as EmailMessage[]),
         soft(supabase.from('email_digests').select('*').order('digest_date', { ascending: false }).limit(1).maybeSingle(), null as EmailDigest | null),
         soft(supabase.from('organize_runs').select('*').order('created_at', { ascending: false }).limit(10), [] as OrganizeRun[]),
+        soft(supabase.from('capture_entries').select('id,raw_text,interpretation,created_at').eq('source', 'chat').eq('status', 'interpreted')
+          .order('created_at', { ascending: false }).limit(20), [] as Handoff[]),
       ]);
       const next: Snapshot = {
         profile: profile as Profile, lifeAreas: lifeAreas as LifeArea[], goals: goals as Goal[], actions: actions as Action[],
         dependencies: dependencies as Dependency[], accomplishments: accomplishments as Accomplishment[], events: events as ProgressEvent[],
         feedback: feedback as FeedbackEntry[], nudges: nudges as Nudge[], reflections: reflections as Reflection[],
         accountability: accountability as AccountabilityPrefs, notifications: notifications as NotificationPrefs,
-        emailAccounts, emailMessages, emailDigest, organizeRuns,
+        emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs: handoffs.filter((h) => h.interpretation?.items?.length),
       };
       setData(next);
       save(next);
@@ -364,6 +374,24 @@ function useStoreValue() {
     }
   }, [data.emailMessages, patch]);
 
+  // ── AI chat connector
+  /** Plans from chat leave the review list once saved (commitCapture marks them committed) or dismissed. */
+  const dismissHandoff = useCallback(async (id: string) => {
+    patch((s) => ({ ...s, handoffs: s.handoffs.filter((h) => h.id !== id) }));
+    if (!DEMO) await check(supabase.from('capture_entries').update({ status: 'dismissed' }).eq('id', id));
+  }, [patch]);
+  const chatConnections = useCallback(async (): Promise<ChatConnection[]> => {
+    if (DEMO) return demo.chatConnections;
+    const { data: grants, error } = await supabase.auth.oauth.listGrants();
+    if (error) throw new Error(error.message);
+    return (grants ?? []).map((g) => ({ client_id: g.client.id, name: g.client.name || 'AI app', uri: g.client.uri || null, granted_at: g.granted_at }));
+  }, []);
+  const revokeChat = useCallback(async (clientId: string) => {
+    if (DEMO) { demo.chatConnections = demo.chatConnections.filter((c) => c.client_id !== clientId); return; }
+    const { error } = await supabase.auth.oauth.revokeGrant({ clientId });
+    if (error) throw new Error(error.message);
+  }, []);
+
   const updateAccomplishment = useCallback(async (id: string, p: Partial<Accomplishment>) => {
     await check(supabase.from('accomplishments').update(p).eq('id', id));
     await refresh();
@@ -446,6 +474,7 @@ function useStoreValue() {
 
   const updateProfile = useCallback(async (p: Partial<Profile>) => {
     patch((s) => ({ ...s, profile: s.profile ? { ...s.profile, ...p } : s.profile }));
+    if (DEMO) return;
     await check(supabase.from('profiles').update(p).eq('id', session!.user.id));
   }, [patch, session]);
   const updateAccountability = useCallback(async (p: Partial<AccountabilityPrefs>) => {
@@ -475,11 +504,13 @@ function useStoreValue() {
     refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture, updateAccomplishment, deleteAccomplishment,
     createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge, upsertLifeArea, deleteLifeArea,
     updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
+    dismissHandoff, chatConnections, revokeChat,
     organizePreview, organizeApply, organizeUndo,
     emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount, emailSync, emailRefreshDigest, emailThread, emailModify,
   }), [session, authReady, loading, online, pending, data, lastOrganized, refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
     updateAccomplishment, deleteAccomplishment, createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge,
     upsertLifeArea, deleteLifeArea, updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
+    dismissHandoff, chatConnections, revokeChat,
     organizePreview, organizeApply, organizeUndo, emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount,
     emailSync, emailRefreshDigest, emailThread, emailModify]);
 }

@@ -2,8 +2,10 @@
 // signed-in screen can be viewed and exercised without a Supabase project or Worker. Never enabled in production builds.
 
 import type { Session } from '@supabase/supabase-js';
+import type { CommitItem } from '../core/ai-contracts';
+import { handoffToDrafts } from '../core/handoff';
 import type { Accomplishment, Action, Goal, LifeArea } from '../core/types';
-import type { EmailAccount, EmailMessage, OrganizePlan, OrganizeRun, Snapshot } from './store';
+import type { ChatConnection, EmailAccount, EmailMessage, Handoff, OrganizePlan, OrganizeRun, Snapshot } from './store';
 
 export const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 
@@ -93,7 +95,23 @@ const MESSAGES: EmailMessage[] = [
   mail('e8', 'm-gmail', 'Bloom & Co', '30% off planters this weekend', 20, 'promotion', 1, 'Weekend sale on planters and pots.', null),
 ];
 
-export const demo: { current: Snapshot } = {
+// A plan Claude sent through the connector, waiting on Today for review. ?fresh=1 in the URL starts as a brand-new user.
+const HANDOFF: Handoff = {
+  id: 'h-1', created_at: iso(-25 * 60_000), raw_text: 'Getting ready for the move on the 15th and catching up on a few loose ends.',
+  interpretation: {
+    version: 1, client: 'Claude', summary: 'Getting ready for the move on the 15th and catching up on a few loose ends.',
+    items: handoffToDrafts([
+      { kind: 'project', title: 'Move to the new apartment', due_date: date(21), hard_deadline: true, why: 'A calmer start in the new place.' },
+      { kind: 'task', title: 'Call Julie about the lease by tomorrow' },
+      { kind: 'task', title: 'Renew the car registration', due_date: date(9), hard_deadline: true, minutes: 15 },
+      { kind: 'done', title: 'Booked the movers' },
+    ], AREAS, GOALS),
+  },
+};
+const FRESH = typeof window !== 'undefined' && /[?&]fresh=1/.test(window.location?.search ?? '');
+
+export const demo: { current: Snapshot; chatConnections: ChatConnection[] } = {
+  chatConnections: [],
   current: {
     profile: { id: 'demo-user', display_name: 'You', timezone: 'UTC', preferred_action_minutes: 15, tone: 'warm', ai_enabled: true, ai_disclosure_accepted_at: iso(-30 * D), weekly_reflection_enabled: true, learned_preferences: {}, auto_organize: true, email_digest_enabled: true },
     lifeAreas: AREAS, goals: GOALS, actions: ACTIONS, dependencies: [], accomplishments: ACCOMPLISHMENTS, events: [], feedback: [], nudges: [], reflections: [],
@@ -107,8 +125,12 @@ export const demo: { current: Snapshot } = {
       counts: { total: 8, action_needed: 3, waiting_on: 1, receipt: 1, newsletter: 1, fyi: 1, promotion: 1 },
     },
     organizeRuns: [],
+    handoffs: [HANDOFF],
   },
 };
+if (FRESH) {
+  demo.current = { ...demo.current, profile: { ...demo.current.profile!, display_name: null, onboarded_at: null }, goals: [], actions: [], accomplishments: [], emailAccounts: [], emailMessages: [], emailDigest: null, handoffs: [] };
+}
 
 const PLAN: OrganizePlan = {
   new_projects: [{ ref: 'p1', title: 'Set up garage storage', life_area_id: 'a-home', reason: 'Bins and bike hooks are both garage storage', action_count: 2 }],
@@ -167,7 +189,25 @@ export async function demoApi(path: string, body: Record<string, unknown>): Prom
     }
     case '/api/email/modify': case '/api/email/disconnect': case '/api/email/connect-imap': return { ok: true };
     case '/api/email/connect': return { url: '/email-accounts?connected=gmail' };
-    case '/api/capture/commit': return { organized: null };
+    case '/api/capture/commit': {
+      // Saves into the in-memory data so captures and reviewed chat plans show up like they would for real.
+      const items = (body.items ?? []) as CommitItem[];
+      const t = new Date().toISOString();
+      const goals = [...s.goals], actions = [...s.actions], accomplishments = [...s.accomplishments];
+      for (const it of items) {
+        if (it.kind === 'goal') {
+          const id = `g-${it.client_id}`;
+          goals.push(goal(id, it.title, it.life_area_id, { deadline: it.deadline, deadline_type: it.deadline ? it.deadline_type : 'none', meaning: it.meaning ?? null, meaning_source: it.meaning ? 'user' : 'none', created_at: t, last_meaningful_progress_at: null }));
+          it.next_actions.forEach((n) => actions.push(act(n.title, id, 'ready', n.estimated_minutes, { created_at: t, origin: 'ai' })));
+        } else if (it.kind === 'action') {
+          actions.push(act(it.title, it.goal_id, 'ready', it.estimated_minutes, { life_area_id: it.life_area_id, due_date: it.deadline, deadline_type: it.deadline ? it.deadline_type : 'none', created_at: t }));
+        } else if (it.kind === 'accomplishment') {
+          accomplishments.unshift({ ...acc(it.title, 0, it.goal_id, it.life_area_id), id: `c-${it.client_id}` });
+        }
+      }
+      demo.current = { ...s, goals, actions, accomplishments, handoffs: s.handoffs.filter((h) => h.id !== body.capture_id) };
+      return { organized: null };
+    }
     default: throw Object.assign(new Error('demo'), { status: 503, code: 'ai_unavailable' });
   }
 }

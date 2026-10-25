@@ -6,7 +6,9 @@ import { Banner, Button, Field, H1, IconButton, Muted, Screen } from '../src/com
 import { isConfigured, supabase } from '../src/lib/supabase';
 
 export default function SignIn() {
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; next?: string }>();
+  // Where to go after signing in (e.g. an AI app's connection request). Same-site paths only.
+  const next = params.next && params.next.startsWith('/') && !params.next.startsWith('//') ? params.next : null;
   const [mode, setMode] = useState<'signin' | 'signup'>(params.mode === 'signup' ? 'signup' : 'signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,7 +23,7 @@ export default function SignIn() {
     setBusy(false);
     if (error) return setMsg(error.message);
     if (mode === 'signup' && !data.session) return setMsg('Check your email to confirm your account, then sign in.');
-    router.replace('/today');
+    router.replace((next ?? (mode === 'signup' ? '/onboarding' : '/')) as never);
   };
 
   const reset = async () => {

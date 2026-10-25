@@ -22,6 +22,8 @@ export default function More() {
     <Screen>
       <H1 style={{ marginTop: 8, marginBottom: 14 }}>Settings</H1>
       <Card style={{ paddingVertical: 4 }}>
+        <Row icon="message-circle" iconColor={colors.pink} title="Your AI Chat" subtitle="Connect Claude, ChatGPT or another AI" onPress={() => router.push('/connect')} />
+        <Divider />
         {email && (
           <>
             <Row icon="mail" iconColor={colors.pink} title="Inbox" subtitle="Digest, summaries and email tasks" onPress={() => router.push('/inbox')} />
@@ -33,6 +35,8 @@ export default function More() {
         <Row icon="grid" iconColor={colors.pink} title="Life Areas" subtitle="Home, Work, Health…" onPress={() => router.push('/life-areas')} />
         <Divider />
         <Row icon="clock" iconColor={colors.pink} title="History" subtitle="Everything you've done" onPress={() => router.push('/history')} />
+        <Divider />
+        <Row icon="compass" iconColor={colors.pink} title="Take the Tour" subtitle="See how Momentum works" onPress={() => router.push({ pathname: '/onboarding', params: { step: 'tour' } })} />
       </Card>
       <Card style={{ paddingVertical: 4 }}>
         {SECTIONS.map((s, i) => (

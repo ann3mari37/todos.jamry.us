@@ -1,0 +1,400 @@
+// Momentum as a connector for AI chats (Claude, ChatGPT, anything that speaks MCP).
+// Streamable HTTP, stateless: every POST to /api/mcp carries one JSON-RPC message and gets a JSON reply.
+// Sign-in is Supabase Auth's OAuth 2.1 server, so the bearer token is an ordinary Supabase access token for the user
+// and every query runs under row-level security, exactly like the app.
+
+import { z } from 'zod';
+import { handoffToDrafts, draftsToCommit, HandoffItem, type HandoffInterpretation } from '../../app/src/core/handoff';
+import { recommend, KIND_LABEL } from '../../app/src/core/recommend';
+import type { Action, Goal, LifeArea } from '../../app/src/core/types';
+import type { Env } from './env';
+import { commitCapture, must, type Ctx } from './ops';
+import { autoOrganize } from './organize';
+import { authenticate, HttpError } from './supabase';
+
+const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
+const OPEN: Action['status'][] = ['ready', 'in_progress', 'waiting', 'blocked'];
+const LIVE_GOALS: Goal['status'][] = ['active', 'waiting', 'blocked', 'paused'];
+
+export const MCP_CORS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization,Content-Type,Mcp-Protocol-Version,Mcp-Session-Id,Last-Event-ID',
+  'Access-Control-Expose-Headers': 'WWW-Authenticate,Mcp-Session-Id',
+  'Access-Control-Max-Age': '86400',
+};
+
+const origin = (env: Env) => (env.API_URL ?? env.APP_URL ?? 'https://todos.jamry.us').replace(/\/$/, '');
+const resourceMetadataUrl = (env: Env) => `${origin(env)}/.well-known/oauth-protected-resource/api/mcp`;
+const reviewUrl = (env: Env, id: string) => `${(env.APP_URL ?? 'https://todos.jamry.us').replace(/\/$/, '')}/capture?handoff=${id}`;
+
+const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
+  new Response(body === null ? null : JSON.stringify(body), { status, headers: { ...MCP_CORS, ...extra, ...(body === null ? {} : { 'Content-Type': 'application/json' }) } });
+
+/** OAuth protected-resource metadata (RFC 9728): tells the chat where to sign the user in. */
+export function protectedResourceMetadata(env: Env): Response {
+  return reply({
+    resource: `${origin(env)}/api/mcp`,
+    authorization_servers: [`${env.SUPABASE_URL}/auth/v1`],
+    bearer_methods_supported: ['header'],
+    resource_name: 'Momentum',
+    resource_documentation: `${origin(env)}/connect`,
+  });
+}
+
+/** Older MCP clients look for authorization-server metadata on this host; pass Supabase's through. */
+export async function authorizationServerMetadata(env: Env): Promise<Response> {
+  const res = await fetch(`${env.SUPABASE_URL}/.well-known/oauth-authorization-server/auth/v1`);
+  if (!res.ok) return reply({ error: 'oauth_server_unavailable' }, 502);
+  return reply(await res.json(), 200, { 'Cache-Control': 'public, max-age=3600' });
+}
+
+// ───────────────────────── tool definitions (JSON Schema for the chat, zod for us)
+
+const itemSchema = {
+  type: 'object',
+  required: ['kind', 'title'],
+  properties: {
+    kind: { type: 'string', enum: ['task', 'project', 'done', 'note'], description: 'task = one concrete action; project = an outcome that needs several steps; done = something already finished (it is celebrated in their history); note = context to attach to an existing project' },
+    title: { type: 'string', maxLength: 200, description: 'Short and concrete, starting with a verb for tasks ("Call Julie about the lease")' },
+    why: { type: 'string', maxLength: 500, description: 'Why it matters to them, in their words when possible. Most useful on projects and bigger tasks.' },
+    due_date: { type: 'string', description: 'YYYY-MM-DD, only when there is a real date' },
+    hard_deadline: { type: 'boolean', description: 'true when the date cannot move (bill, appointment, filing deadline); false or omitted for a target date' },
+    minutes: { type: 'integer', minimum: 1, maximum: 600, description: 'Estimated minutes for a task' },
+    area: { type: 'string', maxLength: 60, description: 'One of their life areas (see get_overview), e.g. "Home"' },
+    project: { type: 'string', maxLength: 200, description: 'For tasks/done/notes: the title or id of an existing project it belongs to' },
+    steps: { type: 'array', maxItems: 5, description: 'For projects: the first 2–5 small steps', items: { type: 'object', required: ['title'], properties: { title: { type: 'string', maxLength: 200 }, minutes: { type: 'integer', minimum: 1, maximum: 600 } } } },
+  },
+};
+const { kind: _k, ...taskProps } = itemSchema.properties;
+
+const TOOLS = [
+  {
+    name: 'get_overview',
+    title: 'Read their Momentum lists',
+    description: "Returns the person's life areas, open projects (with progress and next steps) and open tasks, plus how many chat plans are waiting for their review. Call this first so you know what already exists before suggesting anything.",
+    inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'get_today',
+    title: "Read today's suggestions",
+    description: "Returns Momentum's suggestions for today in its four categories (Meaningful Move, Time-Sensitive, Easy Momentum, Quietly Waiting) plus a few next-up tasks, each with the reason it was picked.",
+    inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'send_plan',
+    title: 'Hand off a plan for review',
+    description: 'The main handoff. After talking it through, send everything you worked out together: tasks, projects with first steps, things already done. Nothing is added yet: it waits in Momentum as "From chat" for them to review, edit and accept. Momentum fills in anything you leave out (life area, minutes, starter steps, why it matters) with its own rules. Tell them it is waiting and share the review link.',
+    inputSchema: {
+      type: 'object',
+      required: ['summary', 'items'],
+      properties: {
+        summary: { type: 'string', maxLength: 2000, description: 'One or two sentences on what you talked about and what this plan is for, written to them ("Getting ready for the move on the 15th…")' },
+        items: { type: 'array', minItems: 1, maxItems: 20, items: itemSchema },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'add_task',
+    title: 'Add a task now',
+    description: 'Adds one task straight to their list, without review. Use only when they clearly ask to add something specific ("add call the dentist tomorrow"); for plans use send_plan.',
+    inputSchema: { type: 'object', required: ['title'], properties: taskProps },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'create_project',
+    title: 'Start a project now',
+    description: 'Creates one project with its first steps straight away, without review. Leave out steps to get Momentum’s starter steps for that kind of project. Use only when they clearly ask; for plans use send_plan.',
+    inputSchema: { type: 'object', required: ['title'], properties: { title: taskProps.title, why: taskProps.why, due_date: taskProps.due_date, hard_deadline: taskProps.hard_deadline, area: taskProps.area, steps: taskProps.steps } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'update_task',
+    title: 'Change a task',
+    description: 'Moves a task to another life area or project, changes its date, or marks it as waiting on someone. Use task ids from get_overview.',
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string', maxLength: 200 },
+        area: { type: 'string', maxLength: 60, description: 'Life area name' },
+        project: { type: 'string', maxLength: 200, description: 'Project title or id, or "none" to take it out of its project' },
+        due_date: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear' },
+        hard_deadline: { type: 'boolean' },
+        waiting: { type: 'boolean', description: 'true = waiting on someone else; false = ready to do' },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'complete_task',
+    title: 'Mark a task done',
+    description: 'Marks a task as done and records it in their history (it counts as progress on its project). Use a task id from get_overview.',
+    inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+];
+
+const INSTRUCTIONS = [
+  'Momentum is the person’s gentle to-do app: tasks, projects (outcomes with steps) and life areas.',
+  'Help them think out loud first: ask what is on their mind, what matters and what has a real date. Keep steps small (5–30 minutes).',
+  'Call get_overview before suggesting things so you build on what already exists instead of duplicating it.',
+  'When the plan feels right, call send_plan once with everything. It waits for their review in the app, so it is safe to be generous.',
+  'Use add_task / create_project only for a single thing they clearly asked to add now.',
+].join(' ');
+
+// ───────────────────────── tool handlers
+
+const UpdateInput = z.object({
+  id: z.string().uuid(),
+  title: z.string().trim().min(1).max(200).optional(),
+  area: z.string().trim().max(60).optional(),
+  project: z.string().trim().max(200).optional(),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  hard_deadline: z.boolean().optional(),
+  waiting: z.boolean().optional(),
+});
+const PlanInput = z.object({ summary: z.string().trim().max(2000).default(''), items: z.array(HandoffItem).min(1).max(20) });
+const IdInput = z.object({ id: z.string().uuid() });
+
+async function load(ctx: Ctx) {
+  const [areas, goals, actions] = await Promise.all([
+    must(ctx.db.from('life_areas').select('id,name,color,icon,sort_order,archived_at,keywords').is('archived_at', null).order('sort_order')),
+    must(ctx.db.from('goals').select('*').in('status', LIVE_GOALS).order('created_at')),
+    must(ctx.db.from('actions').select('*').in('status', [...OPEN, 'suggested']).order('sort_order').order('created_at')),
+  ]);
+  return { areas: areas as LifeArea[], goals: goals as Goal[], actions: actions as Action[] };
+}
+
+const areaName = (areas: LifeArea[], id: string | null) => areas.find((a) => a.id === id)?.name ?? null;
+
+async function overview(ctx: Ctx) {
+  const { areas, goals, actions } = await load(ctx);
+  const { count } = await ctx.db.from('capture_entries').select('id', { count: 'exact', head: true }).eq('source', 'chat').eq('status', 'interpreted');
+  const open = actions.filter((a) => OPEN.includes(a.status));
+  return {
+    life_areas: areas.map((a) => a.name),
+    projects: goals.map((g) => {
+      const steps = actions.filter((a) => a.goal_id === g.id);
+      return {
+        id: g.id, title: g.title, status: g.status, area: areaName(areas, g.life_area_id), why: g.meaning,
+        due: g.deadline ? `${g.deadline}${g.deadline_type === 'hard' ? ' (hard deadline)' : ''}` : null,
+        open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 8).map((a) => ({ id: a.id, title: a.title, minutes: a.estimated_minutes, waiting: a.status === 'waiting' })),
+        last_progress: g.last_meaningful_progress_at?.slice(0, 10) ?? null,
+      };
+    }),
+    tasks: open.filter((a) => !a.goal_id).slice(0, 80).map((a) => ({
+      id: a.id, title: a.title, area: areaName(areas, a.life_area_id), minutes: a.estimated_minutes,
+      due: a.due_date ? `${a.due_date}${a.deadline_type === 'hard' ? ' (hard deadline)' : ''}` : null,
+      waiting: a.status === 'waiting', added: a.created_at.slice(0, 10),
+    })),
+    plans_waiting_for_review: count ?? 0,
+  };
+}
+
+async function today(ctx: Ctx) {
+  const { areas, goals, actions } = await load(ctx);
+  const [deps, feedback] = await Promise.all([
+    must(ctx.db.from('action_dependencies').select('action_id,depends_on_id')),
+    must(ctx.db.from('recommendation_feedback').select('action_id,goal_id,response,created_at').gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString())),
+  ]);
+  const recs = recommend({ goals, actions, dependencies: deps as never, feedback: feedback as never, lifeAreas: areas });
+  return {
+    suggestions: recs.map((r) => ({
+      category: KIND_LABEL[r.kind], task_id: r.action?.id ?? null, task: r.action?.title ?? null, project: r.goal?.title ?? null,
+      minutes: r.action?.estimated_minutes ?? null, reason: r.reason,
+    })),
+  };
+}
+
+async function sendPlan(ctx: Ctx, input: z.infer<typeof PlanInput>, client: string | null) {
+  const { areas, goals } = await load(ctx);
+  const items = handoffToDrafts(input.items, areas, goals.filter((g) => g.status !== 'paused'));
+  const interpretation: HandoffInterpretation = { version: 1, summary: input.summary, client, items };
+  const raw = input.summary || input.items.map((i) => i.title).join('; ');
+  const row = (await must(ctx.db.from('capture_entries').insert({ raw_text: raw.slice(0, 8000), source: 'chat', status: 'interpreted', interpretation }).select('id').single())) as { id: string };
+  return {
+    status: 'waiting_for_review',
+    review_link: reviewUrl(ctx.env, row.id),
+    message: 'Saved in Momentum as "From chat". Nothing is on their list until they review it.',
+    items: items.map((d) => ({
+      kind: d.kind === 'goal' ? 'project' : d.kind === 'accomplishment' ? 'done' : d.kind === 'action' ? 'task' : 'note',
+      title: d.title, area: areaName(areas, d.suggested_life_area_id), project: goals.find((g) => g.id === d.suggested_goal_id)?.title ?? null,
+      due: d.deadline, minutes: d.estimated_minutes, steps: d.next_actions.map((s) => s.title), why: d.meaning || null,
+    })),
+  };
+}
+
+async function addNow(ctx: Ctx, item: HandoffItem) {
+  const { areas, goals } = await load(ctx);
+  const [draft] = handoffToDrafts([item], areas, goals.filter((g) => g.status !== 'paused'));
+  const items = draftsToCommit([{ ...draft, client_id: crypto.randomUUID() }]);
+  const result = (await commitCapture(ctx, { capture_id: null, raw_text: item.title, items, source: 'chat' })) as { items?: { kind: string; id: string }[] };
+  const organized = result.items?.length ? await autoOrganize(ctx, result.items, 'capture', false) : null;
+  const filed = (organized as { changes?: { to_goal_id?: string | null; to_area_id: string | null }[] } | null)?.changes?.[0];
+  return {
+    status: 'added',
+    id: result.items?.[0]?.id ?? null,
+    title: draft.title,
+    area: areaName(areas, filed?.to_area_id ?? draft.suggested_life_area_id),
+    project: goals.find((g) => g.id === (filed?.to_goal_id ?? draft.suggested_goal_id))?.title ?? null,
+    due: draft.deadline,
+    minutes: draft.estimated_minutes,
+    steps: draft.next_actions.map((s) => s.title),
+  };
+}
+
+async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
+  const { areas, goals, actions } = await load(ctx);
+  const task = actions.find((a) => a.id === input.id);
+  if (!task) throw new ToolError('No open task with that id. Call get_overview for current ids.');
+  const p: Record<string, unknown> = {};
+  if (input.title) Object.assign(p, { title: input.title, user_edited: true });
+  if (input.area !== undefined) {
+    const n = input.area.toLowerCase();
+    const area = areas.find((a) => a.name.toLowerCase() === n) ?? areas.find((a) => a.name.toLowerCase().startsWith(n));
+    if (!area) throw new ToolError(`No life area called "${input.area}". Their areas: ${areas.map((a) => a.name).join(', ')}.`);
+    p.life_area_id = area.id;
+  }
+  if (input.project !== undefined) {
+    if (input.project.toLowerCase() === 'none') p.goal_id = null;
+    else {
+      const n = input.project.toLowerCase();
+      const g = goals.find((x) => x.id === input.project || x.title.toLowerCase() === n) ?? goals.find((x) => x.title.toLowerCase().includes(n));
+      if (!g) throw new ToolError(`No project matching "${input.project}".`);
+      p.goal_id = g.id;
+    }
+  }
+  if (input.due_date !== undefined) {
+    p.due_date = input.due_date;
+    p.deadline_type = input.due_date ? (input.hard_deadline ? 'hard' : 'target') : 'none';
+  } else if (input.hard_deadline !== undefined && task.due_date) p.deadline_type = input.hard_deadline ? 'hard' : 'target';
+  if (input.waiting !== undefined) p.status = input.waiting ? 'waiting' : 'ready';
+  if (!Object.keys(p).length) throw new ToolError('Nothing to change.');
+  await must(ctx.db.from('actions').update(p).eq('id', task.id).select('id'));
+  return { status: 'updated', id: task.id, changed: Object.keys(p).filter((k) => k !== 'user_edited') };
+}
+
+async function completeTask(ctx: Ctx, id: string) {
+  const { error } = await ctx.db.rpc('complete_action', { p_action_id: id, p_occurred_at: new Date().toISOString() });
+  if (error) throw new ToolError('Could not mark that task done. Check the id with get_overview.');
+  return { status: 'done', id, message: 'Marked done and added to their history.' };
+}
+
+/** A problem the chat can fix (bad id, unknown area): returned as a tool error, not a protocol error. */
+class ToolError extends Error {}
+
+function issues(e: z.ZodError) {
+  return e.issues.slice(0, 4).map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
+}
+
+async function callTool(ctx: Ctx, name: string, args: unknown, client: string | null): Promise<unknown> {
+  const parse = <S extends z.ZodTypeAny>(schema: S, v: unknown): z.output<S> => {
+    const r = schema.safeParse(v ?? {});
+    if (!r.success) throw new ToolError(`Invalid input: ${issues(r.error)}`);
+    return r.data;
+  };
+  switch (name) {
+    case 'get_overview': return overview(ctx);
+    case 'get_today': return today(ctx);
+    case 'send_plan': return sendPlan(ctx, parse(PlanInput, args), client);
+    case 'add_task': return addNow(ctx, { ...parse(HandoffItem.omit({ kind: true }), args), kind: 'task' });
+    case 'create_project': return addNow(ctx, { ...parse(HandoffItem.omit({ kind: true, project: true, minutes: true }), args), kind: 'project' });
+    case 'update_task': return updateTask(ctx, parse(UpdateInput, args));
+    case 'complete_task': return completeTask(ctx, parse(IdInput, args).id);
+    default: throw new RpcError(-32602, `Unknown tool: ${name}`);
+  }
+}
+
+// ───────────────────────── JSON-RPC
+
+class RpcError extends Error {
+  constructor(public code: number, message: string) { super(message); }
+}
+
+type RpcMessage = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
+
+/** Who is calling, from the token's client_id claim (already verified by Supabase). */
+function clientOf(token: string): string | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { client_id?: string };
+    return payload.client_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function dispatch(msg: RpcMessage, ctx: Ctx, client: string | null): Promise<unknown> {
+  switch (msg.method) {
+    case 'initialize': {
+      const asked = String(msg.params?.protocolVersion ?? '');
+      return {
+        protocolVersion: SUPPORTED_VERSIONS.includes(asked) ? asked : SUPPORTED_VERSIONS[0],
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'momentum', title: 'Momentum', version: '1.0.0' },
+        instructions: INSTRUCTIONS,
+      };
+    }
+    case 'ping': return {};
+    case 'tools/list': return { tools: TOOLS };
+    case 'tools/call': {
+      const name = String(msg.params?.name ?? '');
+      try {
+        const out = await callTool(ctx, name, msg.params?.arguments, client);
+        return { content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out };
+      } catch (e) {
+        if (e instanceof ToolError) return { content: [{ type: 'text', text: e.message }], isError: true };
+        if (e instanceof HttpError) return { content: [{ type: 'text', text: `Momentum could not do that (${e.code}).` }], isError: true };
+        throw e;
+      }
+    }
+    case 'resources/list': return { resources: [] };
+    case 'prompts/list': return { prompts: [] };
+    default: throw new RpcError(-32601, `Method not found: ${msg.method}`);
+  }
+}
+
+export async function handleMcp(req: Request, env: Env): Promise<Response> {
+  if (req.method === 'OPTIONS') return reply(null, 204);
+  if (req.method !== 'POST') return reply({ error: 'method_not_allowed' }, 405, { Allow: 'POST' });
+
+  let auth: Awaited<ReturnType<typeof authenticate>>;
+  try {
+    auth = await authenticate(req, env);
+  } catch {
+    return reply({ error: 'unauthorized' }, 401, { 'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl(env)}"` });
+  }
+  const ctx: Ctx = { env, db: auth.db, userId: auth.userId };
+  const client = clientOf(auth.token);
+
+  let body: unknown;
+  try {
+    const text = await req.text();
+    if (text.length > 256 * 1024) return reply({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Request too large' } }, 413);
+    body = JSON.parse(text);
+  } catch {
+    return reply({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400);
+  }
+
+  const one = async (msg: RpcMessage) => {
+    if (msg.id === undefined || msg.id === null) return null; // notification: nothing to send back
+    try {
+      return { jsonrpc: '2.0', id: msg.id, result: await dispatch(msg, ctx, client) };
+    } catch (e) {
+      const code = e instanceof RpcError ? e.code : -32603;
+      if (!(e instanceof RpcError)) console.error('mcp', { method: msg.method, name: (e as Error).name });
+      return { jsonrpc: '2.0', id: msg.id, error: { code, message: e instanceof RpcError ? e.message : 'Internal error' } };
+    }
+  };
+
+  if (Array.isArray(body)) {
+    const out = (await Promise.all(body.map((m) => one(m as RpcMessage)))).filter(Boolean);
+    return out.length ? reply(out) : reply(null, 202);
+  }
+  const out = await one(body as RpcMessage);
+  return out ? reply(out) : reply(null, 202);
+}

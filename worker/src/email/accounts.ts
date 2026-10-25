@@ -101,7 +101,8 @@ async function saveAccount(env: Env, userId: string, row: { provider: ProviderKi
 
 /** GET /api/email/oauth/callback — the browser lands here from Google/Microsoft; we redirect back into the app. */
 export async function finishOAuth(env: Env, url: URL): Promise<Response> {
-  const back = (path: string, params: Record<string, string>) => Response.redirect(`${appUrl(env)}${path}?${new URLSearchParams(params)}`, 302);
+  // The return path may carry its own query (e.g. /onboarding?step=email).
+  const back = (path: string, params: Record<string, string>) => Response.redirect(`${appUrl(env)}${path}${path.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`, 302);
   let returnTo = '/email-accounts';
   try {
     const state = await verifyState(env.EMAIL_TOKEN_KEY, url.searchParams.get('state') ?? '');

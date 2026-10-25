@@ -197,6 +197,9 @@ const STOP = new Set([
   'the', 'a', 'an', 'and', 'or', 'to', 'for', 'of', 'on', 'in', 'at', 'my', 'our', 'your', 'with', 'from', 'about', 'up', 'out', 'new',
   'get', 'make', 'do', 'set', 'finish', 'start', 'call', 'email', 'buy', 'book', 'send', 'find', 'take', 'go', 'plan', 'organize', 'organise',
   'some', 'more', 'all', 'this', 'that', 'it', 'is', 'be', 'need', 'needs', 'want', 'have', 'list', 'stuff', 'things', 'thing', 'task',
+  // Everyday verbs say what to do, not what it's about: "Renew the car registration" isn't part of "Renew insurance".
+  'renew', 'pay', 'write', 'read', 'review', 'update', 'check', 'schedule', 'cancel', 'order', 'submit', 'reply', 'prepare', 'research',
+  'sign', 'print', 'register', 'apply', 'look', 'ask', 'talk', 'create', 'build', 'design', 'launch', 'fix', 'clean', 'pick', 'drop', 'return',
 ]);
 
 /** Meaningful words, lightly stemmed so "shelves"/"shelf", "painting"/"paint" match. */

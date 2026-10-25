@@ -37,8 +37,8 @@ function ago(iso: string | null) {
 
 export default function EmailAccounts() {
   const store = useStore();
-  const params = useLocalSearchParams<{ connected?: string; email_error?: string }>();
-  const [adding, setAdding] = useState(false);
+  const params = useLocalSearchParams<{ connected?: string; email_error?: string; add?: string }>();
+  const [adding, setAdding] = useState(params.add === '1');
   const [imap, setImap] = useState<(typeof IMAP_PRESETS)[number] | null>(null);
   const [areaFor, setAreaFor] = useState<EmailAccount | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

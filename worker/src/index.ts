@@ -5,6 +5,7 @@ import { availableProviders, connectImap, disconnect, finishOAuth, startOAuth } 
 import * as email from './email/service';
 import type { Env } from './env';
 import { enforceLimits, transcribe } from './ai';
+import { authorizationServerMetadata, handleMcp, MCP_CORS, protectedResourceMetadata } from './mcp';
 import * as ops from './ops';
 import * as organize from './organize';
 import { authenticate, HttpError } from './supabase';
@@ -122,6 +123,15 @@ const DATA_ROUTES: Record<string, Handler> = {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const { pathname: path } = new URL(req.url);
+    // The AI-chat connector (MCP) and its sign-in discovery documents. Open CORS: they use bearer tokens, never cookies.
+    if (path === '/api/mcp') return handleMcp(req, env);
+    if (path.startsWith('/.well-known/oauth-')) {
+      if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: MCP_CORS });
+      if (path.startsWith('/.well-known/oauth-protected-resource')) return protectedResourceMetadata(env);
+      if (path.startsWith('/.well-known/oauth-authorization-server')) return authorizationServerMetadata(env);
+      return new Response('Not found', { status: 404, headers: MCP_CORS });
+    }
     const headers = cors(req, env);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const { pathname } = new URL(req.url);
