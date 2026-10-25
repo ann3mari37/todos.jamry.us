@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
-import { Flower } from '../../src/components/Flower';
+import { ProjectBanner } from '../../src/components/FlowerArt';
 import { Banner, Body, Button, Card, Chip, Divider, Field, H1, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, shortDate, timeOfDay } from '../../src/core/dates';
 import { goalProgress } from '../../src/core/recommend';
@@ -149,9 +149,8 @@ export default function Project() {
         <Muted style={{ fontSize: 15, marginTop: 4 }}>{goal.meaning || 'Why does this matter to you? (optional)'}</Muted>
       </Pressable>
 
-      <View style={{ height: 130, borderRadius: radius.lg, overflow: 'hidden', marginVertical: 14, backgroundColor: '#E8D9D6', alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ position: 'absolute', right: -30, top: -60 }}><Flower size={260} seed={goal.title.length} /></View>
-        <View style={{ position: 'absolute', left: -50, bottom: -80, opacity: 0.5 }}><Flower size={180} seed={goal.title.length / 3} /></View>
+      <View style={{ marginVertical: 14 }}>
+        <ProjectBanner height={130} seed={goal.title.length} />
       </View>
 
       <Segmented value={tab} onChange={setTab} options={[{ value: 'overview', label: 'Overview' }, { value: 'steps', label: 'Steps' }, { value: 'notes', label: 'Notes' }, { value: 'files', label: 'Files' }]} style={{ marginBottom: 14 }} />

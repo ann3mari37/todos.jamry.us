@@ -16,18 +16,18 @@ import { PROMPTS } from './prompts';
 import * as S from './schemas';
 import { HttpError } from './supabase';
 
-type Ctx = { env: Env; db: SupabaseClient; userId: string };
+export type Ctx = { env: Env; db: SupabaseClient; userId: string };
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
-const keepId = (id: string | null, allowed: Set<string>) => (id && allowed.has(id) ? id : null);
+export const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+export const keepId = (id: string | null, allowed: Set<string>) => (id && allowed.has(id) ? id : null);
 
-async function must<T>(p: PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T> {
+export async function must<T>(p: PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T> {
   const { data, error } = await p;
   if (error) throw new HttpError(400, 'db_error', error.message);
   return data as T;
 }
 
-async function profile(ctx: Ctx) {
+export async function profile(ctx: Ctx) {
   const p = (await must(ctx.db.from('profiles').select('ai_enabled,timezone,preferred_action_minutes,tone').single())) as unknown as {
     ai_enabled: boolean; timezone: string; preferred_action_minutes: number; tone: string;
   };

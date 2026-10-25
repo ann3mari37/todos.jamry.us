@@ -1,6 +1,7 @@
 // Scheduled analysis (Cloudflare Cron Trigger). Runs once a day — no polling.
 // 1. Gentle accountability: create at most a few kind check-ins per user per week.
 // 2. Mondays: weekly reflection for users who keep it enabled.
+// 3. Email: sync every connected inbox, triage new mail, and write the morning digest.
 
 import { defaultNudgeMessage, findNudgeCandidates } from '../../app/src/core/accountability';
 import { startOfWeek, toISODate } from '../../app/src/core/dates';
@@ -12,14 +13,16 @@ import { PROMPTS } from './prompts';
 import { summarySchema } from './schemas';
 import { ProgressSummaryOutput } from '../../app/src/core/ai-contracts';
 import { serviceClient } from './supabase';
+import { buildDigest, syncAccounts, triage } from './email/service';
 
 export async function runScheduled(env: Env, now = new Date()) {
   const db = serviceClient(env);
-  const { data: profiles } = await db.from('profiles').select('id,ai_enabled,weekly_reflection_enabled');
+  const { data: profiles } = await db.from('profiles').select('id,ai_enabled,weekly_reflection_enabled,email_digest_enabled');
   for (const p of profiles ?? []) {
     try {
       await accountabilityFor(env, p.id, p.ai_enabled, now);
       if (now.getUTCDay() === 1 && p.weekly_reflection_enabled) await reflectionFor(env, p.id, p.ai_enabled, now);
+      if (p.email_digest_enabled && env.EMAIL_TOKEN_KEY) await emailDigestFor(env, p.id, p.ai_enabled);
     } catch (e) {
       console.error('scheduled job failed', { user: p.id, error: (e as Error).message }); // no task content in logs
     }
@@ -77,4 +80,15 @@ async function reflectionFor(env: Env, userId: string, aiEnabled: boolean, now: 
     } catch { /* facts alone are still useful */ }
   }
   await db.from('weekly_reflections').insert({ user_id: userId, week_start: facts.week_start, facts, summary });
+}
+
+async function emailDigestFor(env: Env, userId: string, aiEnabled: boolean) {
+  const db = serviceClient(env);
+  const { count } = await db.from('email_accounts').select('id', { count: 'exact', head: true }).eq('user_id', userId);
+  if (!count) return;
+  await syncAccounts(env, db, userId, { force: true });
+  if (aiEnabled && env.OPENAI_API_KEY) {
+    try { await triage(env, db, userId, 30); } catch { /* digest falls back to counts */ }
+  }
+  await buildDigest(env, db, userId, { regenerate: true }, aiEnabled && !!env.OPENAI_API_KEY);
 }

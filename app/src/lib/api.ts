@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { DEMO, demoApi } from './demo';
 import { supabase } from './supabase';
 
 // Web is served from todos.jamry.us with the Worker on /api, so a relative path works there.
@@ -22,6 +23,10 @@ async function token(): Promise<string> {
 }
 
 export async function api<T>(path: string, body: unknown, timeoutMs = 30_000): Promise<T> {
+  if (DEMO) {
+    try { return (await demoApi(path, body as Record<string, unknown>)) as T; }
+    catch { throw new ApiError(503, 'ai_unavailable'); }
+  }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -57,6 +62,18 @@ export function friendlyAiError(e: unknown): string {
       return "You're offline. Organized without AI — please check the items.";
     case 'ai_not_configured':
       return "AI isn't set up yet. Organized without AI — please check the items.";
+    case 'email_not_configured':
+    case 'gmail_not_configured':
+    case 'outlook_not_configured':
+      return "Email connections aren't set up on the server yet.";
+    case 'needs_reauth':
+      return 'This inbox needs to be reconnected.';
+    case 'imap_login_failed':
+      return 'The mail server rejected that username or app password.';
+    case 'imap_unreachable':
+      return "Couldn't reach that mail server. Check the server name.";
+    case 'mailbox_unavailable':
+      return "Your mailbox didn't respond. Nothing was changed.";
     default:
       return "AI couldn't help this time. Organized without AI — please check the items.";
   }

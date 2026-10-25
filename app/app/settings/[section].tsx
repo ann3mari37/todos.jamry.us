@@ -85,6 +85,28 @@ export default function Settings() {
             {(['warm', 'neutral', 'brief'] as const).map((t) => <Chip key={t} label={t[0].toUpperCase() + t.slice(1)} selected={p.tone === t} onPress={() => store.updateProfile({ tone: t })} />)}
           </View>
           <Card style={{ marginTop: 12 }}>
+            <Toggle label="Auto-organize new tasks" hint="AI files what you capture into the right project and life area. You can undo any change." value={p.auto_organize !== false} onChange={(v) => store.updateProfile({ auto_organize: v })} />
+          </Card>
+          {store.organizeRuns.length > 0 && (
+            <>
+              <Label>Recent organizing</Label>
+              <Card style={{ paddingVertical: 4 }}>
+                {store.organizeRuns.slice(0, 5).map((r, i) => (
+                  <View key={r.id}>
+                    {i > 0 && <Divider />}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <Body style={{ fontFamily: fonts.medium }}>{r.changes.length} item{r.changes.length === 1 ? '' : 's'} organized{r.created_goal_ids.length ? `, ${r.created_goal_ids.length} new project${r.created_goal_ids.length === 1 ? '' : 's'}` : ''}</Body>
+                        <Muted>{new Date(r.created_at).toLocaleString()} · {r.trigger === 'manual' ? 'you asked' : r.trigger === 'email' ? 'from email' : 'automatic'}{r.undone_at ? ' · undone' : ''}</Muted>
+                      </View>
+                      {!r.undone_at && <Button variant="ghost" title="Undo" style={{ minHeight: 40, paddingHorizontal: 12 }} onPress={() => store.organizeUndo(r.id).then(() => setMsg('Undone.')).catch(() => setMsg("Couldn't undo right now."))} />}
+                    </View>
+                  </View>
+                ))}
+              </Card>
+            </>
+          )}
+          <Card style={{ marginTop: 12 }}>
             <Toggle label="Weekly reflection" hint="An optional look back each Monday." value={p.weekly_reflection_enabled} onChange={(v) => store.updateProfile({ weekly_reflection_enabled: v })} />
           </Card>
           <Button variant="ghost" title="Reset what Momentum has learned" onPress={() => confirm('Reset personalization?', 'Learned preferences and suggestion feedback will be cleared. Your goals and history are not affected.', async () => {

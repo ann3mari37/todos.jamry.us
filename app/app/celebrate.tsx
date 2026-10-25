@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Flower } from '../src/components/Flower';
+import { FlowerArt } from '../src/components/FlowerArt';
 import { Button, IconButton, IconCircle, Muted, type IconName } from '../src/components/ui';
 import { useStore } from '../src/lib/store';
 import { colors, fonts } from '../src/theme';
@@ -64,7 +64,7 @@ export default function Celebrate() {
       <View style={{ width: '100%', maxWidth: 520, alignSelf: 'center', flex: 1, paddingHorizontal: 24 }}>
         <IconButton name="x" label="Close" onPress={close} />
         <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}>
-          <Animated.View style={{ transform: [{ scale }] }}><Flower size={Math.min(260, width * 0.62)} seed={1.5} /></Animated.View>
+          <Animated.View style={{ transform: [{ scale }] }}><FlowerArt slot="celebrate" width={Math.min(280, width * 0.66)} height={Math.min(280, width * 0.66)} seed={1.5} /></Animated.View>
           <Text accessibilityRole="header" style={{ fontFamily: fonts.serif, fontSize: 42, color: colors.text, marginTop: 10 }}>You did it!</Text>
           <Muted style={{ fontSize: 17, textAlign: 'center', marginTop: 8, lineHeight: 24 }}>{subtitle}</Muted>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 28 }}>

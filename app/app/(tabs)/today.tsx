@@ -2,7 +2,10 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
+import { DigestCard } from '../../src/components/EmailBits';
 import { Flower } from '../../src/components/Flower';
+import { FlowerArt } from '../../src/components/FlowerArt';
+import { OrganizeSheet } from '../../src/components/OrganizeSheet';
 import { Ring } from '../../src/components/Ring';
 import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay } from '../../src/core/dates';
@@ -26,12 +29,19 @@ export default function Today() {
   const [selected, setSelected] = useState<(typeof plan.picks)[number] | null>(null);
   const [showModes, setShowModes] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [organizing, setOrganizing] = useState(false);
+  const [organized, setOrganized] = useState<{ text: string; runId: string } | null>(null);
 
   const dayStart = startOfDay().getTime();
   const todayAcc = store.accomplishments.filter((a) => new Date(a.occurred_at).getTime() >= dayStart);
   const advancedToday = new Set(store.events.filter((e) => e.type === 'goal_advanced' && new Date(e.occurred_at).getTime() >= dayStart).map((e) => e.goal_id));
   todayAcc.forEach((a) => a.meaningful && a.goal_id && advancedToday.add(a.goal_id));
   const available = readyActions({ goals: store.goals, actions: store.actions, dependencies: store.dependencies }).length;
+
+  // Unsorted = no project and no life area. A standalone task filed in an area is fine as it is.
+  const loose = store.actions.filter((a) => !a.goal_id && !a.life_area_id && ['ready', 'in_progress', 'waiting', 'blocked'].includes(a.status));
+  const auto = store.lastOrganized;
+  const inboxAction = store.emailMessages.filter((m) => m.category === 'action_needed' && m.status === 'new').length;
 
   const nudge = store.nudges.find((n) => !n.response && Date.now() - new Date(n.created_at).getTime() < 7 * 86_400_000);
   const nudgeGoal = nudge ? store.goals.find((g) => g.id === nudge.goal_id) : null;
@@ -52,8 +62,8 @@ export default function Today() {
 
   return (
     <Screen>
-      <View style={{ position: 'absolute', right: -40, top: -30, opacity: 0.9 }} pointerEvents="none">
-        <Flower size={190} seed={0.7} />
+      <View style={{ position: 'absolute', right: -64, top: -48 }} pointerEvents="none">
+        <FlowerArt slot="header" width={210} height={210} seed={0.7} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 8 }}>
         <View style={{ flex: 1, paddingRight: 90 }}>
@@ -80,6 +90,43 @@ export default function Today() {
 
       {tab === 'today' && (
         <>
+          {(organized || (auto && !auto.undone_at)) && (
+            <Card style={{ backgroundColor: colors.tealSoft, borderColor: colors.tealSoft, paddingVertical: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Icon name="folder" size={18} color={colors.teal} />
+                <Body style={{ flex: 1, fontSize: 14 }}>
+                  {organized?.text ?? `AI filed ${auto!.changes.length} new item${auto!.changes.length === 1 ? '' : 's'} into projects and life areas.`}
+                </Body>
+                <Pressable accessibilityRole="button" hitSlop={8} onPress={async () => { const id = organized?.runId ?? auto!.id; setOrganized(null); store.setLastOrganized(null); await store.organizeUndo(id).catch(() => setNote("Couldn't undo right now.")); }}>
+                  <Text style={{ fontFamily: fonts.semibold, color: colors.teal }}>Undo</Text>
+                </Pressable>
+                <IconButton name="x" size={16} color={colors.textMuted} label="Dismiss" onPress={() => { setOrganized(null); store.setLastOrganized(null); }} />
+              </View>
+            </Card>
+          )}
+
+          {store.emailDigest && (
+            <Pressable onPress={() => router.push('/inbox')} accessibilityRole="button" accessibilityLabel="Open inbox">
+              <DigestCard digest={store.emailDigest} compact />
+              {inboxAction > 0 && <Muted style={{ textAlign: 'right', marginTop: 6, marginBottom: 6, color: colors.pinkDeep, fontFamily: fonts.medium }}>{inboxAction} email{inboxAction === 1 ? '' : 's'} need you · Open inbox ›</Muted>}
+            </Pressable>
+          )}
+          {!store.emailDigest && store.emailAccounts.length > 0 && (
+            <Card onPress={() => router.push('/inbox')} style={{ paddingVertical: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Icon name="mail" size={18} color={colors.pink} />
+                <Body style={{ flex: 1 }}>Inbox{inboxAction ? ` · ${inboxAction} need${inboxAction === 1 ? 's' : ''} you` : ''}</Body>
+                <Icon name="chevron-right" size={16} color={colors.textFaint} />
+              </View>
+            </Card>
+          )}
+
+          {loose.length >= 3 && store.profile?.ai_enabled !== false && (
+            <Pressable onPress={() => setOrganizing(true)} accessibilityRole="button" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.pinkWash, marginBottom: 12, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
+              <Icon name="star" size={14} color={colors.pinkDeep} />
+              <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep, fontSize: 13 }}>{loose.length} unsorted tasks · Organize with AI</Text>
+            </Pressable>
+          )}
           {nudge && (
             <Card style={{ backgroundColor: colors.lavenderSoft }}>
               <Body>{nudge.message}</Body>
@@ -171,6 +218,8 @@ export default function Today() {
 
       {tab === 'week' && <WeekTab />}
       {tab === 'areas' && <AreasTab />}
+
+      <OrganizeSheet visible={organizing} onClose={() => setOrganizing(false)} onApplied={(text, runId) => setOrganized({ text, runId })} />
 
       <Sheet visible={!!selected} onClose={() => setSelected(null)} title={selected?.action?.title}>
         {selected?.goal && <Muted style={{ marginBottom: 6 }}>{selected.goal.title}</Muted>}

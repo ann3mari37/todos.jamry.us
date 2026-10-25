@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, Platform, Pressable, View } from 'react-native';
-import { Button, Card, Divider, Field, H1, IconButton, Muted, Row, Screen, Sheet } from '../src/components/ui';
+import { OrganizeSheet } from '../src/components/OrganizeSheet';
+import { Banner, Button, Card, Divider, Field, H1, IconButton, Muted, Row, Screen, Sheet } from '../src/components/ui';
 import type { LifeArea } from '../src/core/types';
 import { useStore } from '../src/lib/store';
 import { AREA_COLORS, colors } from '../src/theme';
@@ -9,6 +10,15 @@ import { AREA_COLORS, colors } from '../src/theme';
 export default function LifeAreas() {
   const store = useStore();
   const [edit, setEdit] = useState<Partial<LifeArea> | null>(null);
+  const [organizing, setOrganizing] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const OPEN = ['ready', 'in_progress', 'waiting', 'blocked'];
+  const counts = (id: string) => {
+    const projects = store.goals.filter((g) => g.life_area_id === id && g.status === 'active').length;
+    const tasks = store.actions.filter((a) => OPEN.includes(a.status) && (a.life_area_id ?? store.goals.find((g) => g.id === a.goal_id)?.life_area_id) === id).length;
+    return `${projects} project${projects === 1 ? '' : 's'} · ${tasks} open task${tasks === 1 ? '' : 's'}`;
+  };
+  const unfiled = store.actions.filter((a) => OPEN.includes(a.status) && !a.goal_id && !a.life_area_id).length + store.goals.filter((g) => g.status === 'active' && !g.life_area_id).length;
   const active = store.lifeAreas.filter((a) => !a.archived_at);
   const archived = store.lifeAreas.filter((a) => a.archived_at);
 
@@ -24,14 +34,20 @@ export default function LifeAreas() {
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
         <IconButton name="chevron-left" label="Back" onPress={() => (router.canGoBack() ? router.back() : router.navigate('/more'))} />
         <H1 style={{ flex: 1 }}>Life Areas</H1>
+        {store.profile?.ai_enabled !== false && <IconButton name="star" label="Organize with AI" color={colors.pink} onPress={() => setOrganizing(true)} />}
         <IconButton name="plus" label="Add life area" onPress={() => setEdit({ name: '', color: AREA_COLORS[active.length % AREA_COLORS.length], icon: 'circle' })} />
       </View>
       <Muted style={{ marginBottom: 12 }}>Ways to group your life — never quotas.</Muted>
+      {note && <Banner text={note} />}
+      {unfiled > 0 && store.profile?.ai_enabled !== false && (
+        <Button variant="soft" icon="star" title={`File ${unfiled} unsorted item${unfiled === 1 ? '' : 's'} with AI`} onPress={() => setOrganizing(true)} style={{ marginBottom: 12, minHeight: 46 }} />
+      )}
+      <OrganizeSheet visible={organizing} onClose={() => setOrganizing(false)} onApplied={(t) => setNote(t)} />
       <Card style={{ paddingVertical: 4 }}>
         {active.map((a, i) => (
           <View key={a.id}>
             {i > 0 && <Divider />}
-            <Row title={a.name} leading={<View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: a.color }} />} onPress={() => setEdit(a)} />
+            <Row title={a.name} subtitle={counts(a.id)} leading={<View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: `${a.color}33`, alignItems: 'center', justifyContent: 'center' }}><View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: a.color }} /></View>} onPress={() => setEdit(a)} />
           </View>
         ))}
       </Card>

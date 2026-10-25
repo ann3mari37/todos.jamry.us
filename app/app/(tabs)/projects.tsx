@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import React, { useState } from 'react';
+import { OrganizeSheet } from '../../src/components/OrganizeSheet';
 import { Text, View } from 'react-native';
 import { Card, Body, H1, Icon, IconButton, Muted, ProgressBar, Screen, Segmented } from '../../src/components/ui';
 import { goalIcon } from '../../src/lib/icons';
@@ -15,6 +16,8 @@ const STATUS_LABEL: Partial<Record<Goal['status'], string>> = { waiting: 'Waitin
 export default function Projects() {
   const store = useStore();
   const [tab, setTab] = useState<'active' | 'completed' | 'archived'>('active');
+  const [organizing, setOrganizing] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const list = store.goals.filter((g) =>
     tab === 'active' ? ['active', 'waiting', 'blocked', 'paused'].includes(g.status) : g.status === tab,
   );
@@ -22,7 +25,8 @@ export default function Projects() {
   return (
     <Screen>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 14 }}>
-        <H1>Projects</H1>
+        <H1 style={{ flex: 1 }}>Projects</H1>
+        {store.profile?.ai_enabled !== false && <IconButton name="star" label="Organize with AI" color={colors.pink} onPress={() => setOrganizing(true)} />}
         <IconButton name="plus" label="New project" onPress={() => router.push({ pathname: '/capture', params: { mode: 'goal' } })} />
       </View>
       <Segmented value={tab} onChange={setTab} options={[{ value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }, { value: 'archived', label: 'Archived' }]} style={{ marginBottom: 14 }} />
@@ -51,6 +55,23 @@ export default function Projects() {
           </Card>
         );
       })}
+      {tab === 'active' && (() => {
+        const loose = store.actions.filter((a) => !a.goal_id && !a.life_area_id && ['ready', 'in_progress', 'waiting', 'blocked'].includes(a.status));
+        return loose.length > 0 ? (
+          <Card onPress={() => setOrganizing(true)} style={{ backgroundColor: colors.pinkWash, borderColor: colors.pinkSoft }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              <Icon name="inbox" size={22} color={colors.pinkDeep} />
+              <View style={{ flex: 1 }}>
+                <Body style={{ fontFamily: fonts.medium }}>{loose.length} unsorted task{loose.length === 1 ? '' : 's'}</Body>
+                <Muted>Let AI group them into projects and life areas</Muted>
+              </View>
+              <Icon name="chevron-right" size={18} color={colors.textFaint} />
+            </View>
+          </Card>
+        ) : null;
+      })()}
+      {note && <Muted style={{ textAlign: 'center', color: colors.teal, marginBottom: 8 }}>{note}</Muted>}
+      <OrganizeSheet visible={organizing} onClose={() => setOrganizing(false)} onApplied={(t) => setNote(t)} />
       {list.length === 0 && (
         <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
           <Muted style={{ textAlign: 'center' }}>

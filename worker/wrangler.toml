@@ -17,8 +17,11 @@ OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 ALLOWED_ORIGINS = "https://todos.jamry.us"
 AI_HOURLY_LIMIT = "60"
 AI_DAILY_COST_CAP_USD = "1.00"
+APP_URL = "https://todos.jamry.us"
 # SUPABASE_URL and SUPABASE_ANON_KEY are vars; set them here or in the dashboard.
-# Secrets (never commit):  wrangler secret put SUPABASE_SERVICE_ROLE_KEY / OPENAI_API_KEY
+# Email OAuth client IDs are public; set GOOGLE_CLIENT_ID / MS_CLIENT_ID here or in the dashboard.
+# Secrets (never commit):  wrangler secret put SUPABASE_SERVICE_ROLE_KEY / OPENAI_API_KEY /
+#   EMAIL_TOKEN_KEY / GOOGLE_CLIENT_SECRET / MS_CLIENT_SECRET
 
 [observability]
 enabled = true
@@ -36,3 +39,5 @@ OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 ALLOWED_ORIGINS = "http://localhost:8081"
 AI_HOURLY_LIMIT = "60"
 AI_DAILY_COST_CAP_USD = "0.50"
+APP_URL = "http://localhost:8081"
+API_URL = "http://localhost:8787"

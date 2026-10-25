@@ -2,3 +2,9 @@ SUPABASE_URL=https://YOUR-DEV-PROJECT.supabase.co
 SUPABASE_ANON_KEY=your-dev-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-dev-service-role-key
 OPENAI_API_KEY=sk-...
+# Email (optional). Generate a key with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+EMAIL_TOKEN_KEY=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+MS_CLIENT_ID=
+MS_CLIENT_SECRET=

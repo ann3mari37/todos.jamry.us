@@ -75,3 +75,38 @@ export const blockersSchema = obj({
 export const nudgeSchema = obj({ message: str });
 
 export const summarySchema = obj({ summary: str, highlights: arr(str), quiet_goals: arr(str) });
+
+export const organizeSchema = obj({
+  new_projects: arr(obj({ ref: str, title: str, life_area_id: nstr, reason: str })),
+  assignments: arr(
+    obj({
+      kind: enm('action', 'goal'),
+      id: str,
+      goal_id: nstr,
+      goal_ref: nstr,
+      life_area_id: nstr,
+      confidence: { type: 'number' },
+      reason: str,
+    }),
+  ),
+});
+
+const emailStep = obj({ title: str, estimated_minutes: nint, deadline: nstr });
+
+export const emailTriageSchema = obj({
+  messages: arr(
+    obj({
+      id: str,
+      category: enm('action_needed', 'waiting_on', 'fyi', 'newsletter', 'receipt', 'personal', 'promotion', 'other'),
+      importance: { type: 'integer' },
+      summary: str,
+      life_area_id: nstr,
+      suggested_goal_id: nstr,
+      suggested_actions: arr(emailStep),
+    }),
+  ),
+});
+
+export const emailDigestSchema = obj({ summary: str, highlights: arr(obj({ message_id: str, text: str })) });
+
+export const emailThreadSchema = obj({ summary: str, next_steps: arr(emailStep), waiting_on: nstr });

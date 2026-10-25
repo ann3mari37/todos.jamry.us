@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { View } from 'react-native';
 import Svg, { Circle, Defs, G, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 
 // A gerbera daisy drawn in vector form — crisp at any size, no image assets required.
@@ -38,7 +39,9 @@ export function Flower({ size, seed = 0, opacity = 1 }: Props) {
   );
 
   return (
-    <Svg width={size} height={size} viewBox="0 0 200 200" opacity={opacity} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    // Decorative: hidden from screen readers. (The props live on a View because react-native-svg on web passes them to the DOM.)
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: size, height: size }}>
+    <Svg width={size} height={size} viewBox="0 0 200 200" opacity={opacity}>
       <Defs>
         <LinearGradient id="back" x1="0" y1="1" x2="0" y2="0">
           <Stop offset="0" stopColor="#E9577A" />
@@ -74,5 +77,6 @@ export function Flower({ size, seed = 0, opacity = 1 }: Props) {
       ))}
       <Circle cx={c} cy={c} r={17} fill="url(#disc)" />
     </Svg>
+    </View>
   );
 }

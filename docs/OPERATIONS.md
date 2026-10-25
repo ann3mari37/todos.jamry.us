@@ -31,6 +31,10 @@
 | `ALLOWED_ORIGINS` | var | `https://todos.jamry.us` |
 | `AI_HOURLY_LIMIT` | var | per user, default 60 |
 | `AI_DAILY_COST_CAP_USD` | var | per user, default 1.00 |
+| `APP_URL` | var | where OAuth sends the browser back, `https://todos.jamry.us` |
+| `EMAIL_TOKEN_KEY` | **secret** | base64 of 32 random bytes; encrypts mailbox tokens and IMAP passwords. Rotating it means users reconnect. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | var / **secret** | optional; enables "Sign in with Google" for Gmail |
+| `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | var / **secret** | optional; enables Outlook / Microsoft 365 |
 
 **GitHub Actions** (`.github/workflows/deploy.yml`): set the secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SUPABASE_DB_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`, and the variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. CI pushes the two Worker secrets and creates the Pages project if it is missing. Every push to `main` runs the tests, applies migrations, deploys the Worker, and builds and deploys Pages.
 
@@ -42,6 +46,17 @@
 4. **Web:** in `app/`, run `npm run build:web && npx wrangler pages deploy dist --project-name momentum`.
 5. **Check:** `curl https://todos.jamry.us/api/health` → `{"ok":true,"ai":true,...}`.
 6. **iOS:** `npx eas build -p ios --profile production`, then `eas submit`.
+
+## Email setup
+
+Users can connect any number of inboxes: Gmail and Outlook through OAuth, and anything else (iCloud, Yahoo, Fastmail, custom domains) over IMAP with an app password. IMAP only needs `EMAIL_TOKEN_KEY`. The two OAuth providers each need an app registration:
+
+1. **Key:** `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` → GitHub secret `EMAIL_TOKEN_KEY`.
+2. **Google:** in Google Cloud Console, enable the Gmail API, configure the OAuth consent screen, and create a *Web application* client with the redirect URI `https://todos.jamry.us/api/email/oauth/callback`. Scopes: `openid`, `email`, `https://www.googleapis.com/auth/gmail.modify`. Set the GitHub variable `GOOGLE_CLIENT_ID` and the secret `GOOGLE_CLIENT_SECRET`. `gmail.modify` is a *restricted* scope: while the app is in "Testing" it works for up to 100 listed test users. Going public needs Google's verification and a security assessment.
+3. **Microsoft:** in Entra ID → App registrations, create an app for *accounts in any organizational directory and personal Microsoft accounts* with the Web redirect URI above. Add delegated permissions `offline_access`, `openid`, `email`, `User.Read` and `Mail.ReadWrite`, and create a client secret. Set the GitHub variable `MS_CLIENT_ID` and the secret `MS_CLIENT_SECRET`. Secrets expire (24 months max), so put a renewal reminder on the calendar.
+4. **Check:** `curl https://todos.jamry.us/api/health` reports `"email":{"gmail":true,"outlook":true,"imap":true}`.
+
+What is stored: message metadata (sender, subject, a provider preview of 600 characters at most), AI summaries, and categories. Bodies are never stored; whole threads are fetched only when a user taps *Summarize the whole thread*. Tokens and passwords are AES-GCM encrypted in `email_credentials`, which has RLS on and no policies, so only the Worker's service role can read it. The daily cron syncs every inbox, triages new mail, and writes the morning digest.
 
 ## Monitoring and costs
 

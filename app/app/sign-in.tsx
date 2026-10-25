@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
 import { View } from 'react-native';
-import { Flower } from '../src/components/Flower';
+import { FlowerArt } from '../src/components/FlowerArt';
 import { Banner, Button, Field, H1, IconButton, Muted, Screen } from '../src/components/ui';
 import { isConfigured, supabase } from '../src/lib/supabase';
 
@@ -34,7 +34,7 @@ export default function SignIn() {
     <Screen>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <IconButton name="chevron-left" label="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/welcome'))} />
-        <Flower size={110} seed={1.2} />
+        <FlowerArt slot="celebrate" width={120} height={120} seed={1.2} />
       </View>
       <H1>{mode === 'signup' ? 'Welcome to Momentum' : 'Welcome back'}</H1>
       <Muted style={{ marginBottom: 22, fontSize: 15 }}>Small steps. Big change.</Muted>

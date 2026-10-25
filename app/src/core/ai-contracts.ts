@@ -113,6 +113,7 @@ export const CommitItem = z
     meaningful: z.boolean(),
     meaning: z.string().max(1000).optional(), // user-stated "why it matters" (goals)
     next_actions: z.array(z.object({ title, estimated_minutes: minutes }).strict()).max(5),
+    source_email_id: id.nullable().optional(), // tasks created from an email keep a link back to it
   })
   .strict();
 export type CommitItem = z.infer<typeof CommitItem>;
@@ -120,3 +121,83 @@ export const CommitCaptureInput = z
   .object({ capture_id: id.nullable(), raw_text: z.string().max(8000), items: z.array(CommitItem).min(1).max(20) })
   .strict();
 export type CommitCaptureInput = z.infer<typeof CommitCaptureInput>;
+
+// ── organize (file tasks into projects and life areas)
+export const OrganizeOutput = z
+  .object({
+    new_projects: z
+      .array(z.object({ ref: z.string().min(1).max(20), title, life_area_id: id.nullable(), reason: z.string().max(200) }).strict())
+      .max(8),
+    assignments: z
+      .array(
+        z
+          .object({
+            kind: z.enum(['action', 'goal']),
+            id,
+            goal_id: id.nullable(), // move into an existing project
+            goal_ref: z.string().max(20).nullable(), // ...or into one of new_projects
+            life_area_id: id.nullable(),
+            confidence: z.number().min(0).max(1),
+            reason: z.string().max(200),
+          })
+          .strict(),
+      )
+      .max(120),
+  })
+  .strict();
+export type OrganizeOutput = z.infer<typeof OrganizeOutput>;
+export type OrganizeAssignment = OrganizeOutput['assignments'][number];
+export type OrganizeProject = OrganizeOutput['new_projects'][number];
+
+export const ApplyOrganizeInput = z
+  .object({
+    new_projects: z.array(z.object({ ref: z.string().min(1).max(20), title, life_area_id: id.nullable() }).strip()).max(8),
+    assignments: z
+      .array(z.object({ kind: z.enum(['action', 'goal']), id, goal_id: id.nullable(), goal_ref: z.string().max(20).nullable(), life_area_id: id.nullable() }).strip())
+      .min(1)
+      .max(120),
+  })
+  .strict();
+export type ApplyOrganizeInput = z.infer<typeof ApplyOrganizeInput>;
+
+// ── email triage / digest / thread summary
+const emailStep = z.object({ title, estimated_minutes: minutes, deadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable() }).strict();
+export type EmailStep = z.infer<typeof emailStep>;
+export const EMAIL_CATEGORIES = ['action_needed', 'waiting_on', 'fyi', 'newsletter', 'receipt', 'personal', 'promotion', 'other'] as const;
+export type EmailCategory = (typeof EMAIL_CATEGORIES)[number];
+
+export const EmailTriageOutput = z
+  .object({
+    messages: z
+      .array(
+        z
+          .object({
+            id,
+            category: z.enum(EMAIL_CATEGORIES),
+            importance: z.number().int().min(1).max(3),
+            summary: z.string().max(300),
+            life_area_id: id.nullable(),
+            suggested_goal_id: id.nullable(),
+            suggested_actions: z.array(emailStep).max(3),
+          })
+          .strict(),
+      )
+      .max(30),
+  })
+  .strict();
+export type EmailTriageOutput = z.infer<typeof EmailTriageOutput>;
+
+export const EmailDigestOutput = z
+  .object({
+    summary: z.string().max(900),
+    highlights: z.array(z.object({ message_id: id, text: z.string().max(200) }).strict()).max(6),
+  })
+  .strict();
+
+export const EmailThreadOutput = z
+  .object({
+    summary: z.string().max(1200),
+    next_steps: z.array(emailStep).max(5),
+    waiting_on: z.string().max(200).nullable(),
+  })
+  .strict();

@@ -40,14 +40,25 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EMAIL_TOKEN_KEY: ${{ secrets.EMAIL_TOKEN_KEY }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
         run: |
           npm ci
+          EXTRA_VARS=()
+          [ -n "${{ vars.GOOGLE_CLIENT_ID }}" ] && EXTRA_VARS+=(--var "GOOGLE_CLIENT_ID:${{ vars.GOOGLE_CLIENT_ID }}")
+          [ -n "${{ vars.MS_CLIENT_ID }}" ] && EXTRA_VARS+=(--var "MS_CLIENT_ID:${{ vars.MS_CLIENT_ID }}")
           npx wrangler deploy \
             --var SUPABASE_URL:${{ vars.SUPABASE_URL }} \
-            --var SUPABASE_ANON_KEY:${{ vars.SUPABASE_ANON_KEY }}
+            --var SUPABASE_ANON_KEY:${{ vars.SUPABASE_ANON_KEY }} \
+            "${EXTRA_VARS[@]}"
           # Worker secrets come from GitHub secrets, so every credential lives in one place.
           echo "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY
           echo "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+          # Email is optional: only push the secrets that are configured.
+          for name in EMAIL_TOKEN_KEY GOOGLE_CLIENT_SECRET MS_CLIENT_SECRET; do
+            if [ -n "${!name}" ]; then printf '%s' "${!name}" | npx wrangler secret put "$name"; fi
+          done
       - name: Build & deploy web app to Cloudflare Pages
         working-directory: app
         env:
