@@ -21,15 +21,29 @@ interface Plan {
   builtAt?: string;
   /** Rules version that chose these picks; older plans are rebuilt once so rule changes show the same day. */
   v?: number;
+  /** Tasks the user moved past today (Next, Not today, Not a good fit); rebuilds leave them out. */
+  skipped?: string[];
+  /** Fingerprint of the task list the picks were chosen from; a change (new task, new date…) rebuilds them. */
+  sig?: string;
 }
 
-const PLAN_VERSION = 2;
+const PLAN_VERSION = 3;
+
+/** What the picks depend on. Completing a task deliberately doesn't change it, so finished picks aren't refilled. */
+function taskSignature(actions: { id: string; status: string; due_date?: string | null; deadline_type?: string; goal_id: string | null; life_area_id: string | null }[]): string {
+  return actions
+    .filter((a) => a.status !== 'dismissed' && a.status !== 'suggested')
+    .map((a) => `${a.id}:${a.due_date ?? ''}:${a.deadline_type ?? ''}:${a.goal_id ?? ''}:${a.life_area_id ?? ''}:${a.status === 'waiting' ? 'w' : ''}`)
+    .sort()
+    .join('|');
+}
 
 const key = (d: string) => `momentum.plan.${d}`;
 
 /**
- * Today's picks are chosen once and then kept stable. Completing them early
- * does NOT refill the list — the user can ask for more if they want it.
+ * Today's picks stay stable while you work through them: completing them early does NOT refill the list
+ * (the user can ask for more). When the list itself changes — a new task, a new due date, moved into a
+ * project — the mix is rebuilt so the right task lands in the right category.
  */
 export function usePlan() {
   const store = useStore();
@@ -67,21 +81,24 @@ export function usePlan() {
     if (!ready || store.loading || (plan && plan.shown.length > 0)) return;
     const recs = compute(plan?.mode ?? null);
     if (recs.length === 0) return;
-    persist({ date: today, mode: plan?.mode ?? null, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id ?? `goal:${r.goal?.id}`), builtAt: new Date().toISOString() });
+    persist({ date: today, mode: plan?.mode ?? null, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id ?? `goal:${r.goal?.id}`), builtAt: new Date().toISOString(), sig: taskSignature(store.actions) });
   }, [ready, plan, store.loading, compute, persist, today]);
 
-  // New tasks captured after today's picks were chosen fill open slots (up to 3 open suggestions).
-  // Finished picks are never replaced on their own — "Finished for now" still means finished.
+  // The task list changed (new task, due date, project, area, waiting): rebuild the mix. Picks completed today stay
+  // (shown as done) and anything the user skipped stays out.
   useEffect(() => {
     if (!plan || plan.mode || store.loading) return;
-    const builtAt = plan.builtAt ?? `${plan.date}T00:00:00`;
-    const added = store.actions.filter((a) => a.created_at > builtAt && ['ready', 'in_progress'].includes(a.status) && !plan.shown.includes(a.id));
-    if (!added.length) return;
-    const open = plan.picks.filter((p) => !p.action_id || store.actions.find((a) => a.id === p.action_id)?.status !== 'completed').length;
-    const slots = Math.max(0, 3 - open);
-    const addedIds = new Set(added.map((a) => a.id));
-    const fresh = slots ? compute(null, plan.shown).filter((r) => r.action && addedIds.has(r.action.id)).slice(0, slots) : [];
-    persist({ ...plan, picks: [...plan.picks, ...fresh.map(toPick)], shown: [...plan.shown, ...fresh.map((r) => r.action!.id)], builtAt: new Date().toISOString() });
+    const sig = taskSignature(store.actions);
+    if (sig === plan.sig) return;
+    const completed = plan.picks.filter((p) => p.action_id && store.actions.find((a) => a.id === p.action_id)?.status === 'completed');
+    const recs = compute(null, plan.skipped ?? []);
+    persist({
+      ...plan,
+      picks: [...recs.map(toPick), ...completed],
+      shown: [...new Set([...plan.shown, ...recs.map((r) => r.action?.id ?? `goal:${r.goal?.id}`)])],
+      builtAt: new Date().toISOString(),
+      sig,
+    });
   }, [plan, store.actions, store.loading, compute, persist]);
 
   const setMode = useCallback((mode: DailyMode | null) => {
@@ -100,12 +117,12 @@ export function usePlan() {
       ?? candidates.find((r) => r.action && !pickedGoals.has(r.goal?.id ?? null)) ?? candidates.find((r) => r.action);
     const picks = plan.picks.filter((p) => p !== pick);
     if (next) picks.splice(plan.picks.indexOf(pick), 0, toPick(next));
-    persist({ ...plan, picks, shown: [...plan.shown, ...(next?.action ? [next.action.id] : [])] });
+    persist({ ...plan, picks, shown: [...plan.shown, ...(next?.action ? [next.action.id] : [])], skipped: [...(plan.skipped ?? []), ...(pick.action_id ? [pick.action_id] : [])] });
     return !!next;
   }, [plan, compute, persist]);
 
   const remove = useCallback((pick: Pick) => {
-    if (plan) persist({ ...plan, picks: plan.picks.filter((p) => p !== pick) });
+    if (plan) persist({ ...plan, picks: plan.picks.filter((p) => p !== pick), skipped: [...(plan.skipped ?? []), ...(pick.action_id ? [pick.action_id] : [])] });
   }, [plan, persist]);
 
   /** Optional extra work, only when asked for. */
