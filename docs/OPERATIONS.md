@@ -5,13 +5,13 @@
 | | Development | Production |
 |---|---|---|
 | Supabase | separate project (e.g. `momentum-dev`) | `momentum` project |
-| Worker | `wrangler deploy --env dev` → `momentum-api-dev.<account>.workers.dev` | `wrangler deploy` → `todos.jamry.us/api/*` |
-| Web | `npx expo start --web` (localhost:8081) | Cloudflare Pages project `momentum`, custom domain `todos.jamry.us` |
+| Worker + web | `wrangler deploy --env dev` → `momentum-api-dev.<account>.workers.dev` (API only) | Worker `momentum-api` on `todos.jamry.us/*`: serves the web app from `app/dist` and the API on `/api/*` |
+| Web (local) | `npx expo start --web` (localhost:8081) | built into the Worker on every deploy |
 | Cron | off | daily 13:17 UTC |
 
 ## Environment variables
 
-**App** (`app/.env`, public; RLS makes them safe to ship)
+**App** (`app/.env.production` is committed and used by production builds; `app/.env.local` for your machine. Public; RLS makes them safe to ship)
 
 | Name | Example |
 |---|---|
@@ -37,24 +37,42 @@
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | var / **secret** | optional; enables "Sign in with Google" for Gmail |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | var / **secret** | optional; enables Outlook / Microsoft 365 |
 
-**GitHub Actions** (`.github/workflows/deploy.yml`): set the secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SUPABASE_DB_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`, and the variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. CI pushes the two Worker secrets and creates the Pages project if it is missing. Every push to `main` runs the tests, applies migrations, deploys the Worker, and builds and deploys Pages.
+Secrets live only in Cloudflare (`wrangler secret put NAME` in `worker/`, or the dashboard: Workers & Pages → momentum-api → Settings → Variables and Secrets) and survive every deploy. Plain vars belong in `wrangler.toml`: each deploy replaces vars set in the dashboard with the file's.
+
+## Automatic deploys
+
+Cloudflare Workers Builds deploys `main`; GitHub holds no secrets. Every push to `main`:
+
+- **GitHub Actions** (`.github/workflows/deploy.yml`) runs the type checks and tests, so a red ✗ on the commit means something is broken.
+- **Cloudflare** builds the web app and deploys the Worker with it.
+
+One-time setup in the Cloudflare dashboard: Workers & Pages → `momentum-api` → Settings → Builds → Connect, pick the GitHub repo, then:
+
+| Setting | Value |
+|---|---|
+| Production branch | `main` |
+| Root directory | `worker` |
+| Build command | `npm ci && npm run build:app` |
+| Deploy command | `npx wrangler deploy` |
+| Non-production branch builds | off |
+
+Database migrations are not automatic: apply new files in `supabase/migrations/` with `supabase db push` or by pasting them into the Supabase SQL editor before pushing code that needs them.
 
 ## First production deploy
 
 1. **Supabase:** create the project. Under Auth → URL Configuration set the Site URL to `https://todos.jamry.us`. Run `supabase db push`.
-2. **Cloudflare Pages:** create the project `momentum` (Direct Upload). Under Custom domains, add `todos.jamry.us`.
-3. **Worker:** in `worker/`, run `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`, then `wrangler secret put OPENAI_API_KEY`, then `wrangler deploy`. The route `todos.jamry.us/api/*` takes precedence over Pages for API paths.
-4. **Web:** in `app/`, run `npm run build:web && npx wrangler pages deploy dist --project-name momentum`.
-5. **Check:** `curl https://todos.jamry.us/api/health` → `{"ok":true,"ai":true,...}`.
-6. **iOS:** `npx eas build -p ios --profile production`, then `eas submit`.
+2. **Worker:** in `worker/`, run `wrangler secret put SUPABASE_ANON_KEY`, `wrangler secret put SUPABASE_SERVICE_ROLE_KEY` and `wrangler secret put ANTHROPIC_API_KEY`, then `npm run build:app && npx wrangler deploy`. The route `todos.jamry.us/*` serves the whole site.
+3. **Auto-deploy:** connect the repo as described under Automatic deploys.
+4. **Check:** `curl https://todos.jamry.us/api/health` → `{"ok":true,"ai":true,...}`.
+5. **iOS:** `npx eas build -p ios --profile production`, then `eas submit`.
 
 ## Email setup
 
 Users can connect any number of inboxes: Gmail and Outlook through OAuth, and anything else (iCloud, Yahoo, Fastmail, custom domains) over IMAP with an app password. IMAP only needs `EMAIL_TOKEN_KEY`. The two OAuth providers each need an app registration:
 
-1. **Key:** `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` → GitHub secret `EMAIL_TOKEN_KEY`.
-2. **Google:** in Google Cloud Console, enable the Gmail API, configure the OAuth consent screen, and create a *Web application* client with the redirect URI `https://todos.jamry.us/api/email/oauth/callback`. Scopes: `openid`, `email`, `https://www.googleapis.com/auth/gmail.modify`. Set the GitHub variable `GOOGLE_CLIENT_ID` and the secret `GOOGLE_CLIENT_SECRET`. `gmail.modify` is a *restricted* scope: while the app is in "Testing" it works for up to 100 listed test users. Going public needs Google's verification and a security assessment.
-3. **Microsoft:** in Entra ID → App registrations, create an app for *accounts in any organizational directory and personal Microsoft accounts* with the Web redirect URI above. Add delegated permissions `offline_access`, `openid`, `email`, `User.Read` and `Mail.ReadWrite`, and create a client secret. Set the GitHub variable `MS_CLIENT_ID` and the secret `MS_CLIENT_SECRET`. Secrets expire (24 months max), so put a renewal reminder on the calendar.
+1. **Key:** `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` → `wrangler secret put EMAIL_TOKEN_KEY`.
+2. **Google:** in Google Cloud Console, enable the Gmail API, configure the OAuth consent screen, and create a *Web application* client with the redirect URI `https://todos.jamry.us/api/email/oauth/callback`. Scopes: `openid`, `email`, `https://www.googleapis.com/auth/gmail.modify`. Add `GOOGLE_CLIENT_ID` to `[vars]` in `wrangler.toml` and run `wrangler secret put GOOGLE_CLIENT_SECRET`. `gmail.modify` is a *restricted* scope: while the app is in "Testing" it works for up to 100 listed test users. Going public needs Google's verification and a security assessment.
+3. **Microsoft:** in Entra ID → App registrations, create an app for *accounts in any organizational directory and personal Microsoft accounts* with the Web redirect URI above. Add delegated permissions `offline_access`, `openid`, `email`, `User.Read` and `Mail.ReadWrite`, and create a client secret. Add `MS_CLIENT_ID` to `[vars]` in `wrangler.toml` and run `wrangler secret put MS_CLIENT_SECRET`. Secrets expire (24 months max), so put a renewal reminder on the calendar.
 4. **Check:** `curl https://todos.jamry.us/api/health` reports `"email":{"gmail":true,"outlook":true,"imap":true}`.
 
 What is stored: message metadata (sender, subject, a provider preview of 600 characters at most), AI summaries, and categories. Bodies are never stored; whole threads are fetched only when a user taps *Summarize the whole thread*. Tokens and passwords are AES-GCM encrypted in `email_credentials`, which has RLS on and no policies, so only the Worker's service role can read it. The daily cron syncs every inbox, triages new mail, and writes the morning digest.
@@ -65,8 +83,8 @@ What is stored: message metadata (sender, subject, a provider preview of 600 cha
 - **Worker logs:** Cloudflare dashboard → Workers → momentum-api → Logs (observability is enabled). Logs carry error codes only.
 - **Estimated monthly cost for one person:**
   - Supabase Free tier: $0, or Pro at $25 if you want daily backups and no pausing.
-  - Cloudflare Workers Free and Pages: $0.
-  - OpenAI with `gpt-5-mini`: about $0.001–0.003 per capture or decomposition. At around 20 AI calls a day that is roughly **$1–2 a month**. Transcription is about $0.003 per minute.
+  - Cloudflare Workers Free (including static assets and Workers Builds): $0.
+  - Claude: only summaries and project expansion call it; organizing runs on rules. Optional OpenAI transcription is about $0.003 per minute.
   - The per-user daily cap (default $1) is a hard ceiling.
 
 ## Backup and recovery

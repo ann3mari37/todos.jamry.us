@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "build:app": "npm --prefix ../app ci && npm --prefix ../app run build:web && node -e \"require('fs').rmSync('../app/dist/_redirects',{force:true})\"",
     "deploy": "wrangler deploy",
     "deploy:dev": "wrangler deploy --env dev",
     "typecheck": "tsc --noEmit",

@@ -1,11 +1,21 @@
-# Momentum API — Cloudflare Worker
+# Momentum — one Cloudflare Worker serves the web app (static assets) and the API (/api/*).
 name = "momentum-api"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Served on the same domain as the web app, so the browser needs no cross-origin calls.
-routes = [{ pattern = "todos.jamry.us/api/*", zone_name = "jamry.us" }]
+# The whole site: app files from ../app/dist, API calls handled by src/index.ts.
+routes = [{ pattern = "todos.jamry.us/*", zone_name = "jamry.us" }]
+
+# Deployed automatically by Cloudflare Workers Builds on every push to main (see docs/OPERATIONS.md):
+#   root directory: worker   build command: npm ci && npm run build:app   deploy command: npx wrangler deploy
+[assets]
+directory = "../app/dist"
+binding = "ASSETS"
+# Deep links (/project/123, /inbox…) load the app, which routes them in the browser.
+not_found_handling = "single-page-application"
+# API requests always reach the Worker code, never the app files.
+run_worker_first = ["/api/*"]
 
 [triggers]
 crons = ["17 13 * * *"] # daily, 13:17 UTC

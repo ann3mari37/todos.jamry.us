@@ -1,4 +1,7 @@
-name: Test & deploy
+name: Tests
+
+# Deploys are done by Cloudflare Workers Builds (see docs/OPERATIONS.md), so GitHub needs no secrets.
+# This workflow only checks that the code builds and the tests pass.
 
 on:
   push:
@@ -20,54 +23,3 @@ jobs:
         working-directory: app
       - run: npx tsc --noEmit && npx vitest run
         working-directory: worker
-
-  deploy:
-    # Deploys only once the repo is set up for it: add the secrets/variables listed in docs/OPERATIONS.md,
-    # then create the repository variable AUTO_DEPLOY = true. Until then pushes run the tests only.
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.AUTO_DEPLOY == 'true'
-    needs: test
-    runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - uses: supabase/setup-cli@v1
-      - name: Apply database migrations
-        run: supabase db push --db-url "${{ secrets.SUPABASE_DB_URL }}"
-      - name: Deploy API worker
-        working-directory: worker
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          EMAIL_TOKEN_KEY: ${{ secrets.EMAIL_TOKEN_KEY }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
-        run: |
-          npm ci
-          EXTRA_VARS=()
-          [ -n "${{ vars.GOOGLE_CLIENT_ID }}" ] && EXTRA_VARS+=(--var "GOOGLE_CLIENT_ID:${{ vars.GOOGLE_CLIENT_ID }}")
-          [ -n "${{ vars.MS_CLIENT_ID }}" ] && EXTRA_VARS+=(--var "MS_CLIENT_ID:${{ vars.MS_CLIENT_ID }}")
-          # SUPABASE_URL comes from wrangler.toml. SUPABASE_ANON_KEY is a Worker secret (a plain var with the
-          # same name would conflict with it), so it's pushed with the other secrets below.
-          npx wrangler deploy "${EXTRA_VARS[@]}"
-          # Worker secrets come from GitHub, so every credential lives in one place.
-          printf '%s' "${{ vars.SUPABASE_ANON_KEY }}" | npx wrangler secret put SUPABASE_ANON_KEY
-          printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-          # Optional features: only push the secrets that are configured.
-          for name in ANTHROPIC_API_KEY OPENAI_API_KEY EMAIL_TOKEN_KEY GOOGLE_CLIENT_SECRET MS_CLIENT_SECRET; do
-            if [ -n "${!name}" ]; then printf '%s' "${!name}" | npx wrangler secret put "$name"; fi
-          done
-      - name: Build & deploy web app to Cloudflare Pages
-        working-directory: app
-        env:
-          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
-        run: |
-          npm ci
-          npm run build:web
-          npx wrangler pages project create momentum --production-branch main 2>/dev/null || true
-          npx wrangler pages deploy dist --project-name momentum --branch main
