@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toISODate } from '../core/dates';
 import { recommend } from '../core/recommend';
+import { shapeDay, type DaySettings } from '../core/workload';
 import type { DailyMode, Recommendation, RecommendationKind } from '../core/types';
 import { useStore } from './store';
 
@@ -27,6 +28,8 @@ interface Plan {
   sig?: string;
   /** Picks finished today. They leave Today straight away; this only tells "finished for now" from "nothing yet". */
   done?: string[];
+  /** What "Start my day" said about time and energy; rebuilds keep fitting the plan to it. */
+  day?: DaySettings;
 }
 
 const PLAN_VERSION = 3;
@@ -77,14 +80,31 @@ export function usePlan() {
 
   const toPick = (r: Recommendation): Pick => ({ kind: r.kind, action_id: r.action?.id ?? null, goal_id: r.goal?.id ?? null, reason: r.reason });
 
+  /** The task picked last night under "End my day", if it's still open. */
+  const yesterday = toISODate(new Date(Date.now() - 86_400_000));
+  const pinnedId = store.checkins.find((c) => c.day === yesterday)?.tomorrow_first_action_id ?? null;
+
+  /** Today's list: the mixed suggestions, fitted to the day when one was described, with last night's pick first. */
+  const build = useCallback((day: DaySettings | undefined, exclude: string[] = []): Pick[] => {
+    let recs = day ? shapeDay(compute('show_all', exclude), day) : compute(null, exclude);
+    const pinned = pinnedId && !exclude.includes(pinnedId) ? store.actions.find((a) => a.id === pinnedId && ['ready', 'in_progress'].includes(a.status)) : null;
+    let picks = recs.map(toPick);
+    if (pinned) {
+      const existing = picks.find((p) => p.action_id === pinned.id);
+      picks = [{ ...(existing ?? { kind: 'next_up' as const, action_id: pinned.id, goal_id: pinned.goal_id }), reason: 'You picked this last night to start the day with.' },
+        ...picks.filter((p) => p.action_id !== pinned.id)];
+    }
+    return picks;
+  }, [compute, pinnedId, store.actions]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Build the plan the first time there is data today.
   useEffect(() => {
     // An empty plan that never showed anything (e.g. first day, nothing captured yet) may fill once data exists.
     if (!ready || store.loading || (plan && plan.shown.length > 0)) return;
-    const recs = compute(plan?.mode ?? null);
-    if (recs.length === 0) return;
-    persist({ date: today, mode: plan?.mode ?? null, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id ?? `goal:${r.goal?.id}`), builtAt: new Date().toISOString(), sig: taskSignature(store.actions) });
-  }, [ready, plan, store.loading, compute, persist, today]);
+    const picks = build(plan?.day);
+    if (picks.length === 0) return;
+    persist({ date: today, mode: null, day: plan?.day, picks, shown: picks.map((p) => p.action_id ?? `goal:${p.goal_id}`), builtAt: new Date().toISOString(), sig: taskSignature(store.actions) });
+  }, [ready, plan, store.loading, build, persist, today]);
 
   // The task list changed (new task, due date, project, area, waiting): rebuild the mix. Anything the user skipped
   // stays out.
@@ -92,15 +112,24 @@ export function usePlan() {
     if (!plan || plan.mode || store.loading) return;
     const sig = taskSignature(store.actions);
     if (sig === plan.sig) return;
-    const recs = compute(null, plan.skipped ?? []);
+    const picks = build(plan.day, [...(plan.skipped ?? []), ...(plan.done ?? [])]);
     persist({
       ...plan,
-      picks: recs.map(toPick),
-      shown: [...new Set([...plan.shown, ...recs.map((r) => r.action?.id ?? `goal:${r.goal?.id}`)])],
+      picks,
+      shown: [...new Set([...plan.shown, ...picks.map((p) => p.action_id ?? `goal:${p.goal_id}`)])],
       builtAt: new Date().toISOString(),
       sig,
     });
-  }, [plan, store.actions, store.loading, compute, persist]);
+  }, [plan, store.actions, store.loading, build, persist]);
+
+  /** "Start my day": rebuild Today around the time and energy described (skips and finished picks stay out). */
+  const startDay = useCallback((day: DaySettings) => {
+    const exclude = [...(plan?.skipped ?? []), ...(plan?.done ?? [])];
+    const picks = build(day, exclude);
+    persist({ date: today, mode: null, day, picks, shown: [...new Set([...(plan?.shown ?? []), ...picks.map((p) => p.action_id ?? `goal:${p.goal_id}`)])],
+      skipped: plan?.skipped, done: plan?.done, builtAt: new Date().toISOString(), sig: taskSignature(store.actions) });
+    return picks;
+  }, [plan, build, persist, today, store.actions]);
 
   const setMode = useCallback((mode: DailyMode | null) => {
     const recs = compute(mode);
@@ -176,5 +205,5 @@ export function usePlan() {
   // Everything on Today got done and nothing of those kinds is left.
   const finished = resolved.every((r) => !r.action) && (plan?.done?.length ?? 0) > 0;
 
-  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, swap, remove, addMore, byKind };
+  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, startDay, swap, remove, addMore, byKind };
 }

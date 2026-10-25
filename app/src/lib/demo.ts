@@ -137,6 +137,7 @@ export const demo: { current: Snapshot; chatConnections: ChatConnection[] } = {
     },
     organizeRuns: [],
     handoffs: [HANDOFF],
+    checkins: [],
   },
 };
 if (FRESH) {

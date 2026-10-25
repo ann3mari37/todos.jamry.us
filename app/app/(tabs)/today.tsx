@@ -1,5 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { DigestCard } from '../../src/components/EmailBits';
@@ -9,9 +10,9 @@ import { OrganizeSheet } from '../../src/components/OrganizeSheet';
 import { TaskList, useOpenTasks } from '../../src/components/TaskList';
 import { Ring } from '../../src/components/Ring';
 import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
-import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay } from '../../src/core/dates';
+import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay, toISODate } from '../../src/core/dates';
 import { KIND_LABEL, readyActions, remainingSteps } from '../../src/core/recommend';
-import { crunch, staleTasks, type Crunch } from '../../src/core/workload';
+import { crunch, describeMinutes, minutesOf, staleTasks, type Crunch } from '../../src/core/workload';
 import type { RecommendationKind } from '../../src/core/types';
 import { useStore } from '../../src/lib/store';
 import { usePlan, type Pick } from '../../src/lib/usePlan';
@@ -44,6 +45,32 @@ export default function Today() {
   };
   const [organizing, setOrganizing] = useState(false);
   const [ringInfo, setRingInfo] = useState(false);
+
+  // ── Start my day / End my day. Never automatic: the person opens them when their day starts and ends. The only
+  // prompt is a small card on a new date that hasn't been started yet, which "Not now" hides for the rest of the day.
+  const params = useLocalSearchParams<{ start?: string; room?: string; energy?: string; ended?: string }>();
+  const todayIso = toISODate(new Date());
+  const checkin = store.checkins.find((c) => c.day === todayIso);
+  const [promptHidden, setPromptHidden] = useState(true);
+  useEffect(() => {
+    AsyncStorage.getItem('momentum.dayPromptHidden').then((v) => setPromptHidden(v === todayIso)).catch(() => setPromptHidden(false));
+  }, [todayIso]);
+  const hidePrompt = () => { setPromptHidden(true); AsyncStorage.setItem('momentum.dayPromptHidden', todayIso).catch(() => {}); };
+  const showDayPrompt = !promptHidden && !checkin?.started_at && !store.loading && store.actions.some((a) => ['ready', 'in_progress'].includes(a.status));
+  useEffect(() => {
+    if (params.start !== '1' || !plan.ready || store.loading) return;
+    const energy = params.energy === 'low' || params.energy === 'okay' || params.energy === 'high' ? params.energy : null;
+    const picks = plan.startDay({ roomMinutes: params.room ? Number(params.room) : null, energy });
+    const total = picks.reduce((sum, x) => { const a = store.actions.find((y) => y.id === x.action_id); return sum + (a ? minutesOf(a) : 0); }, 0);
+    setNote(picks.length ? `Here’s your day: ${picks.length} thing${picks.length === 1 ? '' : 's'}, about ${describeMinutes(total)}.` : 'Nothing needs you today. Enjoy the space.');
+    router.setParams({ start: undefined, room: undefined, energy: undefined });
+    hidePrompt();
+  }, [params.start, plan.ready, store.loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (params.ended !== '1') return;
+    setNote(store.checkins.find((c) => c.day === todayIso)?.tomorrow_first_action_id ? 'Day wrapped. Tomorrow’s first thing will be waiting at the top. Rest well.' : 'Day wrapped. Rest well.');
+    router.setParams({ ended: undefined });
+  }, [params.ended]); // eslint-disable-line react-hooks/exhaustive-deps
   const [crunchOpen, setCrunchOpen] = useState(false);
   const load = useMemo(() => crunch(store.actions, store.goals), [store.actions, store.goals]);
   const stale = useMemo(() => staleTasks(store.actions, store.goals), [store.actions, store.goals]);
@@ -88,6 +115,16 @@ export default function Today() {
         <View style={{ flex: 1, paddingRight: 90 }}>
           <H1 style={{ fontSize: 32 }}>{greeting()}</H1>
           <Muted style={{ fontSize: 15, marginTop: 4 }}>Make something meaningful happen today.</Muted>
+          <Pressable
+            onPress={() => router.push({ pathname: '/day', params: { mode: checkin?.started_at ? 'end' : 'start' } })}
+            accessibilityRole="button"
+            style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 10, paddingVertical: 8, paddingHorizontal: 14,
+              borderRadius: radius.pill, backgroundColor: checkin?.ended_at ? colors.tealSoft : colors.card, borderWidth: 1, borderColor: checkin?.ended_at ? colors.tealSoft : colors.border }, pressed && { opacity: 0.7 }]}>
+            <Icon name={!checkin?.started_at ? 'sunrise' : checkin.ended_at ? 'check' : 'sunset'} size={15} color={checkin?.ended_at ? colors.teal : colors.pinkDeep} />
+            <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: checkin?.ended_at ? colors.teal : colors.pinkDeep }}>
+              {!checkin?.started_at ? 'Start my day' : checkin.ended_at ? 'Day wrapped' : 'End my day'}
+            </Text>
+          </Pressable>
         </View>
         <IconButton name="settings" label="Settings" onPress={() => router.push('/more')} />
       </View>
@@ -112,6 +149,21 @@ export default function Today() {
 
       {tab === 'today' && (
         <>
+          {showDayPrompt && (
+            <Card style={{ backgroundColor: colors.amberSoft, borderColor: colors.amberSoft, paddingVertical: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <IconCircle name="sunrise" color={colors.amber} soft={colors.white} size={40} />
+                <View style={{ flex: 1 }}>
+                  <Body style={{ fontFamily: fonts.medium }}>It’s a new day. Want to plan it?</Body>
+                  <Muted>A couple of quick questions, and Today fits your time and energy.</Muted>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                <Button title="Start my day" onPress={() => router.push({ pathname: '/day', params: { mode: 'start' } })} style={{ flex: 1, minHeight: 44 }} />
+                <Button title="Not now" variant="ghost" onPress={hidePrompt} style={{ minHeight: 44 }} />
+              </View>
+            </Card>
+          )}
           {(organized || (auto && !auto.undone_at)) && (
             <Card style={{ backgroundColor: colors.tealSoft, borderColor: colors.tealSoft, paddingVertical: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -227,9 +279,9 @@ export default function Today() {
                   </View>
                 </View>
               </Card>
-              <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={`Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8}
+              <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={pick.kind === 'next_up' ? 'Something else' : `Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8}
                   style={{ position: 'absolute', left: 72, bottom: 28, flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 28 }}>
-                  <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>Next {KIND_LABEL[pick.kind].toLowerCase()}</Text>
+                  <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>{pick.kind === 'next_up' ? 'Something else' : `Next ${KIND_LABEL[pick.kind].toLowerCase()}`}</Text>
                   <Icon name="chevron-right" size={13} color={colors.textMuted} />
                 </Pressable>
               </View>

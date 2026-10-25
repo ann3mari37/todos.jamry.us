@@ -3,7 +3,7 @@
 
 import { daysSince, daysUntil, friendlyDate, toISODate } from './dates';
 import { estimateMinutes, looksLikeProject } from './rules';
-import type { Action, Goal } from './types';
+import type { Action, Goal, Recommendation } from './types';
 
 /** Focused minutes a day the plan assumes is realistic. Crunch advice spreads work so no day goes over it. */
 export const DAILY_CAPACITY = 120;
@@ -233,4 +233,52 @@ export function projectsNeedingAttention(goals: Goal[], actions: Action[], now: 
 /** Calendar date `days` from today (local). */
 export function inDays(days: number, now: Date = new Date()): string {
   return dateIn(days, now);
+}
+
+// ───────────────────────── Start my day: fit Today to the time and energy there is
+
+export interface DaySettings {
+  /** Minutes of room today (null = not said; about two hours is assumed). */
+  roomMinutes: number | null;
+  energy: 'low' | 'okay' | 'high' | null;
+}
+
+const LOW_ENERGY_ORDER: Recommendation['kind'][] = ['time_sensitive', 'easy_momentum', 'next_up', 'quietly_waiting', 'meaningful_move'];
+
+/**
+ * Trims a mixed list of suggestions to the day someone described:
+ *   - Real deadlines due by tomorrow always stay.
+ *   - Low energy: nothing over 30 minutes (except those deadlines), and quick wins come before the meaningful move.
+ *   - Then suggestions are added in order while they fit the room (at least one, at most one card per half hour, max 8).
+ */
+export function shapeDay(recs: Recommendation[], day: DaySettings, now: Date = new Date()): Recommendation[] {
+  const budget = day.roomMinutes ?? DAILY_CAPACITY;
+  const maxCards = Math.min(8, Math.max(1, Math.round(budget / 30)));
+  const mins = (r: Recommendation) => (r.action ? minutesOf(r.action) : 20);
+  const urgent = (r: Recommendation) => {
+    const a = r.action;
+    const date = a?.due_date && a.deadline_type === 'hard' ? a.due_date : r.goal?.deadline_type === 'hard' ? r.goal.deadline : null;
+    return r.kind === 'time_sensitive' && !!date && daysUntil(date, now) <= 1;
+  };
+  let list = recs.filter((r) => r.action);
+  if (day.energy === 'low') {
+    list = list
+      .filter((r) => urgent(r) || mins(r) <= 30)
+      .sort((x, y) => LOW_ENERGY_ORDER.indexOf(x.kind) - LOW_ENERGY_ORDER.indexOf(y.kind));
+  }
+  const out: Recommendation[] = list.filter(urgent);
+  let used = out.reduce((s, r) => s + mins(r), 0);
+  for (const r of list) {
+    if (out.includes(r) || out.length >= maxCards) continue;
+    if (out.length > 0 && used + mins(r) > budget) continue;
+    out.push(r);
+    used += mins(r);
+  }
+  const order = day.energy === 'low' ? LOW_ENERGY_ORDER : ['meaningful_move', 'time_sensitive', 'easy_momentum', 'quietly_waiting', 'next_up'];
+  return out.sort((x, y) => order.indexOf(x.kind) - order.indexOf(y.kind));
+}
+
+/** "About 1 h 30 min" for what's on Today. */
+export function describeMinutes(m: number): string {
+  return fmtMinutes(m);
 }

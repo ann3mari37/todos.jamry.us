@@ -4,6 +4,7 @@ import * as Crypto from 'expo-crypto';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Platform } from 'react-native';
 import type { CommitItem, EmailCategory, EmailStep } from '../core/ai-contracts';
+import { toISODate } from '../core/dates';
 import type { HandoffInterpretation } from '../core/handoff';
 import { DEMO, demo, demoSession } from './demo';
 import type { Accomplishment, Action, Dependency, FeedbackEntry, Goal, LifeArea } from '../core/types';
@@ -27,6 +28,11 @@ export interface Profile {
 }
 /** A plan an AI chat sent through the Momentum connector, waiting for review. */
 export interface Handoff { id: string; raw_text: string; interpretation: HandoffInterpretation; created_at: string }
+/** "Start my day" / "End my day" for one local calendar date. */
+export interface DayCheckin {
+  day: string; started_at: string | null; ended_at: string | null; room_minutes: number | null;
+  energy: 'low' | 'okay' | 'high' | null; tomorrow_first_action_id: string | null; note: string | null;
+}
 /** An AI app the user allowed to reach Momentum (Supabase OAuth grant). */
 export interface ChatConnection { client_id: string; name: string; uri: string | null; granted_at: string }
 export interface EmailAccount {
@@ -71,12 +77,14 @@ export interface Snapshot {
   emailDigest: EmailDigest | null;
   organizeRuns: OrganizeRun[];
   handoffs: Handoff[];
+  /** Yesterday's and today's check-ins (newest first). */
+  checkins: DayCheckin[];
 }
 
 const EMPTY: Snapshot = {
   profile: null, lifeAreas: [], goals: [], actions: [], dependencies: [], accomplishments: [], events: [],
   feedback: [], nudges: [], reflections: [], accountability: null, notifications: null,
-  emailAccounts: [], emailMessages: [], emailDigest: null, organizeRuns: [], handoffs: [],
+  emailAccounts: [], emailMessages: [], emailDigest: null, organizeRuns: [], handoffs: [], checkins: [],
 };
 
 type OutboxOp =
@@ -220,7 +228,8 @@ function useStoreValue() {
         check(supabase.from('notification_preferences').select('*').maybeSingle()),
       ]);
       const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
-      const [emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs] = await Promise.all([
+      const yesterday = toISODate(new Date(Date.now() - 86_400_000));
+      const [emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs, checkins] = await Promise.all([
         soft(supabase.from('email_accounts').select('*').order('created_at'), [] as EmailAccount[]),
         soft(supabase.from('email_messages').select('id,account_id,thread_id,from_name,from_address,subject,snippet,received_at,is_unread,is_archived,labels,category,importance,summary,life_area_id,suggested_goal_id,suggested_actions,thread_summary,thread_next_steps,status')
           .eq('is_archived', false).gte('received_at', weekAgo).order('received_at', { ascending: false }).limit(200), [] as EmailMessage[]),
@@ -228,13 +237,14 @@ function useStoreValue() {
         soft(supabase.from('organize_runs').select('*').order('created_at', { ascending: false }).limit(10), [] as OrganizeRun[]),
         soft(supabase.from('capture_entries').select('id,raw_text,interpretation,created_at').eq('source', 'chat').eq('status', 'interpreted')
           .order('created_at', { ascending: false }).limit(20), [] as Handoff[]),
+        soft(supabase.from('daily_checkins').select('*').gte('day', yesterday).order('day', { ascending: false }), [] as DayCheckin[]),
       ]);
       const next: Snapshot = {
         profile: profile as Profile, lifeAreas: lifeAreas as LifeArea[], goals: goals as Goal[], actions: actions as Action[],
         dependencies: dependencies as Dependency[], accomplishments: accomplishments as Accomplishment[], events: events as ProgressEvent[],
         feedback: feedback as FeedbackEntry[], nudges: nudges as Nudge[], reflections: reflections as Reflection[],
         accountability: accountability as AccountabilityPrefs, notifications: notifications as NotificationPrefs,
-        emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs: handoffs.filter((h) => h.interpretation?.items?.length),
+        emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs: handoffs.filter((h) => h.interpretation?.items?.length), checkins,
       };
       setData(next);
       save(next);
@@ -380,6 +390,16 @@ function useStoreValue() {
     patch((s) => ({ ...s, handoffs: s.handoffs.filter((h) => h.id !== id) }));
     if (!DEMO) await check(supabase.from('capture_entries').update({ status: 'dismissed' }).eq('id', id));
   }, [patch]);
+  /** Saves part of a day's check-in (merged with what's there). */
+  const saveCheckin = useCallback(async (day: string, p: Partial<Omit<DayCheckin, 'day'>>) => {
+    const blank: DayCheckin = { day, started_at: null, ended_at: null, room_minutes: null, energy: null, tomorrow_first_action_id: null, note: null };
+    patch((s) => {
+      const cur = s.checkins.find((c) => c.day === day) ?? blank;
+      return { ...s, checkins: [{ ...cur, ...p }, ...s.checkins.filter((c) => c.day !== day)].sort((x, y) => y.day.localeCompare(x.day)) };
+    });
+    if (DEMO) return;
+    await check(supabase.from('daily_checkins').upsert({ day, ...p, updated_at: new Date().toISOString() }, { onConflict: 'user_id,day' }));
+  }, [patch]);
   const chatConnections = useCallback(async (): Promise<ChatConnection[]> => {
     if (DEMO) return demo.chatConnections;
     const { data: grants, error } = await supabase.auth.oauth.listGrants();
@@ -502,7 +522,7 @@ function useStoreValue() {
   }, []);
 
   const deleteAllData = useCallback(async () => {
-    for (const t of ['progress_events', 'accomplishments', 'recommendation_feedback', 'recommendations', 'nudges', 'action_dependencies', 'actions', 'goal_context', 'goals', 'capture_entries', 'weekly_reflections', 'client_mutations', 'organize_runs', 'email_digests', 'email_messages']) {
+    for (const t of ['progress_events', 'accomplishments', 'recommendation_feedback', 'recommendations', 'nudges', 'action_dependencies', 'actions', 'goal_context', 'goals', 'capture_entries', 'weekly_reflections', 'client_mutations', 'organize_runs', 'email_digests', 'email_messages', 'daily_checkins']) {
       await check(supabase.from(t).delete().eq('user_id', session!.user.id));
     }
     await refresh();
@@ -513,13 +533,13 @@ function useStoreValue() {
     refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture, updateAccomplishment, deleteAccomplishment,
     createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge, upsertLifeArea, deleteLifeArea,
     updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
-    dismissHandoff, chatConnections, revokeChat,
+    dismissHandoff, chatConnections, revokeChat, saveCheckin,
     organizePreview, organizeApply, organizeUndo,
     emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount, emailSync, emailRefreshDigest, emailThread, emailModify,
   }), [session, authReady, loading, online, pending, data, lastOrganized, refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
     updateAccomplishment, deleteAccomplishment, createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge,
     upsertLifeArea, deleteLifeArea, updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
-    dismissHandoff, chatConnections, revokeChat,
+    dismissHandoff, chatConnections, revokeChat, saveCheckin,
     organizePreview, organizeApply, organizeUndo, emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount,
     emailSync, emailRefreshDigest, emailThread, emailModify]);
 }

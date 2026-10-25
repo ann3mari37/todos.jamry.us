@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { recommend } from '../recommend';
-import type { Action, Goal } from '../types';
-import { crunch, projectHealth, staleTasks } from '../workload';
+import type { Action, Goal, Recommendation } from '../types';
+import { crunch, projectHealth, shapeDay, staleTasks } from '../workload';
 
 const now = new Date('2026-10-26T15:00:00');
 const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
@@ -121,5 +121,37 @@ describe('project health', () => {
     const a = goal('Website');
     const steps = [act('1', { goal_id: a.id, status: 'completed' }), act('2', { goal_id: a.id, status: 'completed' }), act('3', { goal_id: a.id, status: 'completed' }), act('4', { goal_id: a.id })];
     expect(projectHealth(a, steps, now).state).toBe('almost_done');
+  });
+});
+
+describe('start my day', () => {
+  const rec = (kind: Recommendation['kind'], a: Action): Recommendation => ({ kind, action: a, goal: null, reason: '', score: 0 });
+  const recs = () => [
+    rec('meaningful_move', act('Write the proposal', { estimated_minutes: 60 })),
+    rec('time_sensitive', due('Pay rent', 1, true, 10)),
+    rec('easy_momentum', act('Reply to Maya', { estimated_minutes: 5 })),
+    rec('quietly_waiting', act('Sort photos', { estimated_minutes: 30 })),
+    rec('next_up', act('Book haircut', { estimated_minutes: 10 })),
+    rec('next_up', act('Clean the fridge', { estimated_minutes: 45 })),
+  ];
+
+  it('fits a little room: real deadlines stay, then what fits', () => {
+    const out = shapeDay(recs(), { roomMinutes: 30, energy: 'okay' }, now).map((r) => r.action!.title);
+    expect(out).toContain('Pay rent');
+    expect(out.length).toBe(1);
+  });
+
+  it('low energy drops long things and puts quick wins before the meaningful move', () => {
+    const out = shapeDay(recs(), { roomMinutes: 180, energy: 'low' }, now).map((r) => r.action!.title);
+    expect(out).not.toContain('Write the proposal');
+    expect(out).not.toContain('Clean the fridge');
+    expect(out[0]).toBe('Pay rent');
+    expect(out[1]).toBe('Reply to Maya');
+  });
+
+  it('plenty of room and energy keeps the meaningful move first', () => {
+    const out = shapeDay(recs(), { roomMinutes: 180, energy: 'high' }, now).map((r) => r.action!.title);
+    expect(out[0]).toBe('Write the proposal');
+    expect(out.length).toBe(6);
   });
 });
