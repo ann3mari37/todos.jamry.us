@@ -1,7 +1,8 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Easing, Text, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Confetti } from '../src/components/Confetti';
 import { FlowerArt } from '../src/components/FlowerArt';
 import { Button, IconButton, IconCircle, Muted, type IconName } from '../src/components/ui';
 import { useStore } from '../src/lib/store';
@@ -13,25 +14,6 @@ const BADGES: { icon: IconName; label: string; color: string; soft: string }[] =
   { icon: 'feather', label: 'Momentum\nbuilding', color: colors.green, soft: colors.greenSoft },
   { icon: 'sun', label: 'Your effort\nmatters', color: colors.amber, soft: colors.amberSoft },
 ];
-
-function Petal({ x, delay, width, height, color }: { x: number; delay: number; width: number; height: number; color: string }) {
-  const y = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.timing(y, { toValue: 1, duration: 5200, delay, easing: Easing.linear, useNativeDriver: true })).start();
-  }, [y, delay]);
-  return (
-    <Animated.View
-      style={{
-        position: 'absolute', left: x, top: -20, width: 14, height: 22, borderRadius: 10, backgroundColor: color, opacity: 0.75,
-        transform: [
-          { translateY: y.interpolate({ inputRange: [0, 1], outputRange: [0, height + 40] }) },
-          { translateX: y.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, width * 0.04, -width * 0.02] }) },
-          { rotate: y.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '320deg'] }) },
-        ],
-      }}
-    />
-  );
-}
 
 export default function Celebrate() {
   const { action: actionId, goal: goalId, count } = useLocalSearchParams<{ action?: string; goal?: string; count?: string }>();
@@ -55,12 +37,10 @@ export default function Celebrate() {
     if (!reduceMotion) Animated.spring(scale, { toValue: 1, friction: 5, useNativeDriver: true }).start();
   }, [reduceMotion, scale]);
 
-  const petals = useMemo(() => Array.from({ length: 14 }, (_, i) => ({ x: ((i * 97) % 100) / 100 * width, delay: i * 360, color: i % 4 === 0 ? colors.amber : i % 5 === 0 ? colors.green : colors.pink })), [width]);
   const close = () => (router.canGoBack() ? router.back() : router.replace('/today'));
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      {!reduceMotion && petals.map((p, i) => <Petal key={i} {...p} width={width} height={height} />)}
       <View style={{ width: '100%', maxWidth: 520, alignSelf: 'center', flex: 1, paddingHorizontal: 24 }}>
         <IconButton name="x" label="Close" onPress={close} />
         <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}>
@@ -87,6 +67,7 @@ export default function Celebrate() {
           )}
         </View>
       </View>
+      {!reduceMotion && <Confetti width={width} height={height} origin={{ x: 0.5, y: 0.32 }} seed={(actionId ?? goalId ?? count ?? 'x').length * 131 + 7} />}
     </SafeAreaView>
   );
 }

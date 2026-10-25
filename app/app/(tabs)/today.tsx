@@ -177,8 +177,9 @@ export default function Today() {
               ? `Due ${friendlyDate(goal.deadline)} · ${steps} step${steps === 1 ? '' : 's'} left`
               : pick.reason;
             return (
+              // "Next" sits on top of the card rather than inside it: a button inside the card's button is invalid on the web.
+              <View key={`${pick.action_id ?? pick.goal_id}-${i}`}>
               <Card
-                key={`${pick.action_id ?? pick.goal_id}-${i}`}
                 onPress={() => (action ? setSelected({ pick, action, goal }) : goal && router.push({ pathname: '/project/[id]', params: { id: goal.id } }))}
                 accessibilityLabel={`${KIND_LABEL[pick.kind]}: ${action?.title ?? goal?.title}${done ? ', done' : ''}`}
                 style={done ? { opacity: 0.6 } : undefined}
@@ -190,12 +191,7 @@ export default function Today() {
                     <Body style={{ fontFamily: fonts.medium, fontSize: 17, marginTop: 2, textDecorationLine: done ? 'line-through' : 'none' }}>{action?.title ?? goal?.title}</Body>
                     {action && goal && pick.kind !== 'time_sensitive' && pick.kind !== 'quietly_waiting' && <Muted style={{ marginTop: 2 }} numberOfLines={1}>{goal.title}</Muted>}
                     <Muted style={{ marginTop: 4 }} numberOfLines={2}>{sub}</Muted>
-                    {!done && (
-                      <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={`Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8} style={{ alignSelf: 'flex-start', marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 28 }}>
-                        <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>Next {KIND_LABEL[pick.kind].toLowerCase()}</Text>
-                        <Icon name="chevron-right" size={13} color={colors.textMuted} />
-                      </Pressable>
-                    )}
+                    {!done && <View style={{ height: 36 }} /> /* room for the Next button laid over the card */}
                   </View>
                   <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
                     <Icon name="chevron-right" size={18} color={colors.textFaint} />
@@ -203,6 +199,14 @@ export default function Today() {
                   </View>
                 </View>
               </Card>
+              {!done && (
+                <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={`Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8}
+                  style={{ position: 'absolute', left: 72, bottom: 28, flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 28 }}>
+                  <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>Next {KIND_LABEL[pick.kind].toLowerCase()}</Text>
+                  <Icon name="chevron-right" size={13} color={colors.textMuted} />
+                </Pressable>
+              )}
+              </View>
             );
           })}
 
