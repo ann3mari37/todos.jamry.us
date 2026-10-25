@@ -199,28 +199,7 @@ export default function Today() {
 
           {shownPicks.map(({ pick, action, goal }, i) => {
             const style = KIND_STYLE[pick.kind];
-            const done = action?.status === 'completed';
-            // A finished card folds into a slim row that can reveal the next one of the same kind.
-            if (done) {
-              const more = plan.moreOfKind(pick.kind);
-              return (
-                <View key={`${pick.action_id ?? pick.goal_id}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: radius.lg, backgroundColor: colors.tealSoft, marginBottom: 12 }}>
-                  <IconCircle name="check" color={colors.white} soft={colors.teal} size={28} />
-                  <Muted style={{ flex: 1, textDecorationLine: 'line-through' }} numberOfLines={1}>{action?.title}</Muted>
-                  {more > 0 ? (
-                    <Pressable onPress={() => plan.swap(pick, true)} accessibilityRole="button" accessibilityLabel={`See the next ${KIND_LABEL[pick.kind].toLowerCase()}, ${more} more`} hitSlop={8}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                      <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.teal }}>See next {KIND_LABEL[pick.kind].toLowerCase()} · {more}</Text>
-                      <Icon name="chevron-right" size={14} color={colors.teal} />
-                    </Pressable>
-                  ) : (
-                    <Pressable onPress={() => plan.remove(pick)} accessibilityRole="button" accessibilityLabel="Clear this" hitSlop={8}>
-                      <Icon name="x" size={16} color={colors.textMuted} />
-                    </Pressable>
-                  )}
-                </View>
-              );
-            }
+            // Finished picks never show here: usePlan replaces them with the next of their kind as soon as they're done.
             const steps = goal ? remainingSteps(goal.id, store.actions) : 0;
             const sub = pick.kind === 'time_sensitive' && goal?.deadline
               ? `Due ${friendlyDate(goal.deadline)} · ${steps} step${steps === 1 ? '' : 's'} left`
@@ -230,17 +209,17 @@ export default function Today() {
               <View key={`${pick.action_id ?? pick.goal_id}-${i}`}>
               <Card
                 onPress={() => (action ? setSelected({ pick, action, goal }) : goal && router.push({ pathname: '/project/[id]', params: { id: goal.id } }))}
-                accessibilityLabel={`${KIND_LABEL[pick.kind]}: ${action?.title ?? goal?.title}${done ? ', done' : ''}`}
-                style={done ? { opacity: 0.6 } : undefined}
+                accessibilityLabel={`${KIND_LABEL[pick.kind]}: ${action?.title ?? goal?.title}`}
               >
                 <View style={{ flexDirection: 'row', gap: 12 }}>
-                  {done ? <IconCircle name="check" color={colors.white} soft={colors.teal} size={44} /> : <IconCircle name={style.icon} color={style.color} soft={style.soft} size={44} />}
+                  <IconCircle name={style.icon} color={style.color} soft={style.soft} size={44} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: style.color === colors.amber ? '#D99A2B' : style.color }}>{KIND_LABEL[pick.kind]}</Text>
-                    <Body style={{ fontFamily: fonts.medium, fontSize: 17, marginTop: 2, textDecorationLine: done ? 'line-through' : 'none' }}>{action?.title ?? goal?.title}</Body>
+                    <Body style={{ fontFamily: fonts.medium, fontSize: 17, marginTop: 2 }}>{action?.title ?? goal?.title}</Body>
                     {action && goal && pick.kind !== 'time_sensitive' && pick.kind !== 'quietly_waiting' && <Muted style={{ marginTop: 2 }} numberOfLines={1}>{goal.title}</Muted>}
                     <Muted style={{ marginTop: 4 }} numberOfLines={2}>{sub}</Muted>
-                    {!done && <View style={{ height: 36 }} /> /* room for the Next button laid over the card */}
+                    {/* room for the Next button laid over the card */}
+                    <View style={{ height: 36 }} />
                   </View>
                   <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
                     <Icon name="chevron-right" size={18} color={colors.textFaint} />
@@ -248,13 +227,11 @@ export default function Today() {
                   </View>
                 </View>
               </Card>
-              {!done && (
-                <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={`Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8}
+              <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={`Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8}
                   style={{ position: 'absolute', left: 72, bottom: 28, flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 28 }}>
                   <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>Next {KIND_LABEL[pick.kind].toLowerCase()}</Text>
                   <Icon name="chevron-right" size={13} color={colors.textMuted} />
                 </Pressable>
-              )}
               </View>
             );
           })}
