@@ -66,6 +66,10 @@ export interface Action {
   times_skipped: number;
   completed_at: string | null;
   created_at: string;
+  /** Hidden from Today until this date (YYYY-MM-DD). */
+  snoozed_until?: string | null;
+  /** Last looked at in a tidy-up; restarts the "sitting a while" clock. */
+  reviewed_at?: string | null;
 }
 
 export interface Accomplishment {

@@ -431,11 +431,19 @@ function useStoreValue() {
   const updateAction = useCallback(async (id: string, p: Partial<Action>) => {
     const edited = p.title !== undefined || p.estimated_minutes !== undefined ? { user_edited: true } : {};
     patch((s) => ({ ...s, actions: s.actions.map((a) => (a.id === id ? { ...a, ...p, ...edited } : a)) }));
+    if (DEMO) return;
     await check(supabase.from('actions').update({ ...p, ...edited }).eq('id', id));
     refresh();
   }, [patch, refresh]);
 
   const createGoal = useCallback(async (g: Partial<Goal> & { title: string }) => {
+    if (DEMO) {
+      const t = new Date().toISOString();
+      const goal = { id: `g-${uuid()}`, life_area_id: null, description: null, meaning: null, meaning_source: 'none', deadline: null, deadline_type: 'none', status: 'active', completion_criteria: null, icon: 'target', accountability: 'default', snoozed_until: null, last_meaningful_progress_at: null, completed_at: null, archived_at: null, created_at: t, updated_at: t, ...g } as Goal;
+      demo.current = { ...demo.current, goals: [...demo.current.goals, goal] };
+      setData({ ...demo.current });
+      return goal;
+    }
     const rows = await check(supabase.from('goals').insert(g).select('*'));
     await refresh();
     return (rows as Goal[])[0];
@@ -443,6 +451,7 @@ function useStoreValue() {
 
   const updateGoal = useCallback(async (id: string, p: Partial<Goal>) => {
     patch((s) => ({ ...s, goals: s.goals.map((g) => (g.id === id ? { ...g, ...p } : g)) }));
+    if (DEMO) return;
     await check(supabase.from('goals').update(p).eq('id', id));
     refresh();
   }, [patch, refresh]);

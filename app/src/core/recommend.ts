@@ -4,6 +4,7 @@
 
 import { daysSince, daysUntil, friendlyDate } from './dates';
 import { estimateMinutes, suggestWhy } from './rules';
+import { idleDays, isSnoozed } from './workload';
 import type {
   Action,
   DailyMode,
@@ -72,7 +73,7 @@ export function readyActions(input: RecommendInput): Action[] {
 
   return input.actions.filter((a) => {
     if (!ACTIONABLE.includes(a.status)) return false;
-    if (exclude.has(a.id) || rested.has(a.id)) return false;
+    if (exclude.has(a.id) || rested.has(a.id) || isSnoozed(a, now)) return false;
     if (a.goal_id) {
       const g = goalById.get(a.goal_id);
       if (!g || !goalIsEligible(g, now, input.includePaused)) return false;
@@ -159,7 +160,8 @@ export function recommend(input: RecommendInput): Recommendation[] {
       dated.push({ g, a, d: deadlineDays(g, now)!, hard: g.deadline_type === 'hard', label: g.title, date: g.deadline!, left: remainingSteps(g.id, input.actions) });
     }
   }
-  dated.sort((x, y) => (x.d < 0 ? 0 : 1) - (y.d < 0 ? 0 : 1) || (x.hard ? 0 : 1) - (y.hard ? 0 : 1) || x.d - y.d);
+  // Same day and kind of date: quickest first, so a pile-up shrinks fast.
+  dated.sort((x, y) => (x.d < 0 ? 0 : 1) - (y.d < 0 ? 0 : 1) || (x.hard ? 0 : 1) - (y.hard ? 0 : 1) || x.d - y.d || minutes(x.a) - minutes(y.a));
   const tsReason = (x: (typeof dated)[number]) => {
     const when = x.d < 0 ? `was due ${friendlyDate(x.date, now)}` : x.d === 0 ? 'is due today' : `is due ${friendlyDate(x.date, now)}`;
     const kindWord = x.hard ? '' : ' (target date)';
@@ -245,13 +247,13 @@ export function recommend(input: RecommendInput): Recommendation[] {
     .sort((x, y) => y.idle - x.idle)[0];
   const resting = restedActions(input, now);
   const followUp = input.actions
-    .filter((a) => a.status === 'waiting' && !usedActions.has(a.id) && !resting.has(a.id))
-    .map((a) => ({ a, days: daysSince(a.created_at, now) ?? 0 }))
+    .filter((a) => a.status === 'waiting' && !usedActions.has(a.id) && !resting.has(a.id) && !isSnoozed(a, now))
+    .map((a) => ({ a, days: idleDays(a, now) }))
     .filter((x) => x.days >= 5)
     .sort((x, y) => y.days - x.days)[0];
   const oldTask = ready
     .filter((a) => !a.goal_id && !usedActions.has(a.id))
-    .map((a) => ({ a, days: daysSince(a.created_at, now) ?? 0 }))
+    .map((a) => ({ a, days: idleDays(a, now) }))
     .filter((x) => x.days >= 21)
     .sort((x, y) => y.days - x.days)[0];
   const meaningfulQuiet = quietGoal(true, inactivity);

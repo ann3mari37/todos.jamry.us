@@ -7,6 +7,7 @@ import { Card, Body, H1, Icon, IconButton, Muted, ProgressBar, Screen, Segmented
 import { goalIcon } from '../../src/lib/icons';
 import { shortDate } from '../../src/core/dates';
 import { goalProgress } from '../../src/core/recommend';
+import { projectHealth } from '../../src/core/workload';
 import type { Goal } from '../../src/core/types';
 import { useStore } from '../../src/lib/store';
 import { colors, fonts } from '../../src/theme';
@@ -35,6 +36,8 @@ export default function Projects() {
       {list.map((g) => {
         const { done, total } = goalProgress(g.id, store.actions);
         const area = store.lifeAreas.find((a) => a.id === g.life_area_id);
+        const health = g.status === 'active' ? projectHealth(g, store.actions, new Date(), store.accountability?.inactivity_days ?? 10) : null;
+        const healthColor = health?.tone === 'warn' ? '#B7791F' : health?.tone === 'good' ? colors.teal : '#7A5FB8';
         return (
           <Card key={g.id} onPress={() => router.push({ pathname: '/project/[id]', params: { id: g.id } })} accessibilityLabel={`${g.title}, ${done} of ${total} steps`}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -49,6 +52,7 @@ export default function Projects() {
                     </Text>
                   )}
                   {STATUS_LABEL[g.status] && <Muted>{STATUS_LABEL[g.status]}</Muted>}
+                  {health && health.state !== 'on_track' && <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: healthColor }}>{health.label}</Text>}
                   <Muted>{done} / {total}</Muted>
                 </View>
               </View>

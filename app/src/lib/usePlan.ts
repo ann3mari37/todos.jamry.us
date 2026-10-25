@@ -106,15 +106,22 @@ export function usePlan() {
     persist({ date: today, mode, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id).filter(Boolean) as string[], builtAt: new Date().toISOString() });
   }, [compute, persist, today]);
 
-  /** "Next" / "Show me something else": swap one pick for the next suggestion of the same kind (any kind if none left). */
-  const swap = useCallback((pick: Pick) => {
+  /**
+   * "Next" / "Show me something else": swap one pick for the next suggestion of the same kind (any kind if none left).
+   * `sameKindOnly` ("See next" on a finished card) never falls back to another kind; with nothing left the card just goes.
+   */
+  const swap = useCallback((pick: Pick, sameKindOnly = false) => {
     if (!plan) return false;
-    const exclude = [...plan.shown, ...plan.picks.map((p) => p.action_id).filter(Boolean) as string[]];
-    const pickedGoals = new Set(plan.picks.filter((p) => p !== pick).map((p) => p.goal_id));
+    // After finishing one, the next most urgent of that kind is wanted even if it appeared earlier today; only what's
+    // on Today now and what was skipped stay out. "Something else" also avoids everything already shown today.
+    const onToday = plan.picks.map((p) => p.action_id).filter(Boolean) as string[];
+    const exclude = sameKindOnly ? [...onToday, ...(plan.skipped ?? [])] : [...plan.shown, ...onToday];
+    // Avoid two cards from the same project. Standalone tasks have no project, so they never block each other.
+    const pickedGoals = new Set(plan.picks.filter((p) => p !== pick && p.goal_id).map((p) => p.goal_id));
     const sameKind = compute(null, exclude, pick.kind).filter((r) => r.action);
     const candidates = compute(plan.mode, exclude);
     const next = sameKind.find((r) => !pickedGoals.has(r.goal?.id ?? null)) ?? sameKind[0]
-      ?? candidates.find((r) => r.action && !pickedGoals.has(r.goal?.id ?? null)) ?? candidates.find((r) => r.action);
+      ?? (sameKindOnly ? undefined : candidates.find((r) => r.action && !pickedGoals.has(r.goal?.id ?? null)) ?? candidates.find((r) => r.action));
     const picks = plan.picks.filter((p) => p !== pick);
     if (next) picks.splice(plan.picks.indexOf(pick), 0, toPick(next));
     persist({ ...plan, picks, shown: [...plan.shown, ...(next?.action ? [next.action.id] : [])], skipped: [...(plan.skipped ?? []), ...(pick.action_id ? [pick.action_id] : [])] });
@@ -140,6 +147,12 @@ export function usePlan() {
     goal: p.goal_id ? store.goals.find((g) => g.id === p.goal_id) ?? null : null,
   })).filter((x) => (x.pick.action_id ? x.action && x.action.status !== 'dismissed' : x.goal && x.goal.status === 'active')), [plan, store.actions, store.goals]);
 
+  /** How many more of a kind are ready beyond what's on Today (for "See next · 3 more"). */
+  const moreOfKind = useCallback((kind: RecommendationKind) => {
+    const out = new Set([...(plan?.picks ?? []).map((p) => p.action_id), ...(plan?.skipped ?? [])]);
+    return compute(null, [], kind).filter((r) => r.action && !out.has(r.action.id)).length;
+  }, [plan, compute]);
+
   /** Filter row: every current suggestion of one kind, live (not fixed for the day). */
   const byKind = useCallback((kind: RecommendationKind) => compute(null, [], kind).map((r) => ({
     pick: toPick(r), action: r.action, goal: r.goal,
@@ -148,5 +161,5 @@ export function usePlan() {
   const actionable = resolved.filter((r) => r.action);
   const finished = actionable.length > 0 && actionable.every((r) => r.action!.status === 'completed');
 
-  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, swap, remove, addMore, byKind };
+  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, swap, remove, addMore, byKind, moreOfKind };
 }

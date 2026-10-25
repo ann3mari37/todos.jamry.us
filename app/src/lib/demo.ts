@@ -56,6 +56,17 @@ const ACTIONS: Action[] = [
   act('Buy storage bins', null, 'ready', 15), act('Book dentist cleaning', null, 'ready', 10, { due_date: date(2), deadline_type: 'target' }), act('Reply to Maya about Saturday', null, 'ready', 5),
   act('Hang the hooks for bikes', null, 'ready', 20),
   act('Hear back from the landlord', null, 'waiting', 5, { life_area_id: 'a-home', created_at: iso(-8 * D) }),
+  // A pile-up due today/tomorrow (Today shows "A lot is due at once"):
+  act('Pay the water bill', null, 'ready', 10, { due_date: date(1), deadline_type: 'hard', life_area_id: 'a-fin' }),
+  act('Submit expense report', null, 'ready', 30, { due_date: date(1), deadline_type: 'hard', life_area_id: 'a-work' }),
+  act('Call the pharmacy', null, 'ready', 5, { due_date: date(0), deadline_type: 'hard', life_area_id: 'a-health' }),
+  act('RSVP to the wedding', null, 'ready', 5, { due_date: date(1), deadline_type: 'target', life_area_id: 'a-rel' }),
+  act('Return library books', null, 'ready', 15, { due_date: date(0), deadline_type: 'target' }),
+  act('Plan the birthday dinner', null, 'ready', 90, { due_date: date(1), deadline_type: 'target', life_area_id: 'a-rel' }),
+  // Things that have sat a while (the "Tidy up" review):
+  act('Fix the squeaky door', null, 'ready', 15, { life_area_id: 'a-home', created_at: iso(-34 * D) }),
+  act('Learn Spanish basics', null, 'ready', null, { life_area_id: 'a-growth', created_at: iso(-50 * D), times_skipped: 3 }),
+  act('Clean out the car', null, 'ready', 30, { created_at: iso(-70 * D) }),
 ];
 
 const acc = (title: string, hoursAgo: number, goal_id: string | null, life_area_id: string | null): Accomplishment => ({

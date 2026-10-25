@@ -11,6 +11,7 @@ import { Ring } from '../../src/components/Ring';
 import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay } from '../../src/core/dates';
 import { KIND_LABEL, readyActions, remainingSteps } from '../../src/core/recommend';
+import { crunch, staleTasks, type Crunch } from '../../src/core/workload';
 import type { RecommendationKind } from '../../src/core/types';
 import { useStore } from '../../src/lib/store';
 import { usePlan, type Pick } from '../../src/lib/usePlan';
@@ -42,6 +43,10 @@ export default function Today() {
     else if (!plan.swap(x.pick)) setNote("That's everything that's ready right now.");
   };
   const [organizing, setOrganizing] = useState(false);
+  const [ringInfo, setRingInfo] = useState(false);
+  const [crunchOpen, setCrunchOpen] = useState(false);
+  const load = useMemo(() => crunch(store.actions, store.goals), [store.actions, store.goals]);
+  const stale = useMemo(() => staleTasks(store.actions, store.goals), [store.actions, store.goals]);
   const [organized, setOrganized] = useState<{ text: string; runId: string } | null>(null);
 
   const dayStart = startOfDay().getTime();
@@ -92,7 +97,9 @@ export default function Today() {
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 18 }}>
         <Ring value={todayAcc.length} label={todayAcc.length === 1 ? 'accomplishment today' : 'accomplishments today'} size={120} from={colors.pink} to={colors.teal} emphasis />
-        <Ring value={advancedToday.size} label="goals advanced" size={92} from={colors.amber} to={colors.teal} />
+        <Pressable onPress={() => setRingInfo(true)} accessibilityRole="button" accessibilityLabel={`${advancedToday.size} projects moved today. What counts?`}>
+          <Ring value={advancedToday.size} label={advancedToday.size === 1 ? 'project moved' : 'projects moved'} size={92} from={colors.amber} to={colors.teal} />
+        </Pressable>
         <Ring value={available} label="actions available" size={92} from={colors.teal} to={colors.green} />
       </View>
 
@@ -157,6 +164,26 @@ export default function Today() {
             </Card>
           )}
 
+          {load.level !== 'calm' && (
+            <Card onPress={() => setCrunchOpen(true)} accessibilityLabel={`${load.headline}. Make a plan`}
+              style={{ backgroundColor: load.level === 'crunch' ? colors.amberSoft : colors.card, borderColor: load.level === 'crunch' ? colors.amberSoft : colors.border, paddingVertical: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <IconCircle name="calendar" color={colors.amber} soft={load.level === 'crunch' ? colors.white : colors.amberSoft} size={40} />
+                <View style={{ flex: 1 }}>
+                  <Body style={{ fontFamily: fonts.medium }}>{load.level === 'crunch' ? 'A lot is due at once' : 'A busy couple of days'}</Body>
+                  <Muted>{load.headline}</Muted>
+                </View>
+                <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep, fontSize: 13 }}>Make a plan ›</Text>
+              </View>
+            </Card>
+          )}
+          {stale.length >= 3 && (
+            <Pressable onPress={() => router.push('/review')} accessibilityRole="button" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.lavenderSoft, marginBottom: 12, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>
+              <Icon name="wind" size={14} color={colors.lavender} />
+              <Text style={{ fontFamily: fonts.medium, color: '#7A5FB8', fontSize: 13 }}>{stale.length} things have been sitting a while · Tidy up</Text>
+            </Pressable>
+          )}
+
           <FilterRow value={filter} counts={counts} onChange={(f) => { setFilter(f); setSkipped(new Set()); setNote(null); }} />
 
           {!filter && plan.finished && (
@@ -173,6 +200,27 @@ export default function Today() {
           {shownPicks.map(({ pick, action, goal }, i) => {
             const style = KIND_STYLE[pick.kind];
             const done = action?.status === 'completed';
+            // A finished card folds into a slim row that can reveal the next one of the same kind.
+            if (done) {
+              const more = plan.moreOfKind(pick.kind);
+              return (
+                <View key={`${pick.action_id ?? pick.goal_id}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: radius.lg, backgroundColor: colors.tealSoft, marginBottom: 12 }}>
+                  <IconCircle name="check" color={colors.white} soft={colors.teal} size={28} />
+                  <Muted style={{ flex: 1, textDecorationLine: 'line-through' }} numberOfLines={1}>{action?.title}</Muted>
+                  {more > 0 ? (
+                    <Pressable onPress={() => plan.swap(pick, true)} accessibilityRole="button" accessibilityLabel={`See the next ${KIND_LABEL[pick.kind].toLowerCase()}, ${more} more`} hitSlop={8}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                      <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.teal }}>See next {KIND_LABEL[pick.kind].toLowerCase()} · {more}</Text>
+                      <Icon name="chevron-right" size={14} color={colors.teal} />
+                    </Pressable>
+                  ) : (
+                    <Pressable onPress={() => plan.remove(pick)} accessibilityRole="button" accessibilityLabel="Clear this" hitSlop={8}>
+                      <Icon name="x" size={16} color={colors.textMuted} />
+                    </Pressable>
+                  )}
+                </View>
+              );
+            }
             const steps = goal ? remainingSteps(goal.id, store.actions) : 0;
             const sub = pick.kind === 'time_sensitive' && goal?.deadline
               ? `Due ${friendlyDate(goal.deadline)} · ${steps} step${steps === 1 ? '' : 's'} left`
@@ -245,6 +293,25 @@ export default function Today() {
       {tab === 'week' && <WeekTab />}
       {tab === 'areas' && <AreasTab />}
 
+      <CrunchSheet visible={crunchOpen} load={load} onClose={() => setCrunchOpen(false)} />
+      <Sheet visible={ringInfo} onClose={() => setRingInfo(false)} title="Projects moved today">
+        {advancedToday.size > 0
+          ? [...advancedToday].map((id) => <Body key={id ?? 'x'} style={{ paddingVertical: 4 }}>• {store.goals.find((g) => g.id === id)?.title ?? 'A project'}</Body>)
+          : <Body>None yet today.</Body>}
+        <Muted style={{ marginTop: 10 }}>
+          A project moves forward when you finish one of its steps. Standalone tasks still count as accomplishments (the big ring), they just aren’t part of a project.
+        </Muted>
+        {(() => {
+          const empty = store.goals.filter((g) => g.status === 'active' && remainingSteps(g.id, store.actions) === 0);
+          return empty.length > 0 ? (
+            <>
+              <Muted style={{ marginTop: 10, color: colors.text, fontFamily: fonts.medium }}>These projects have no next step, so they can’t move yet:</Muted>
+              {empty.slice(0, 4).map((g) => <SheetOption key={g.id} icon="plus-circle" label={`Add a step to “${g.title}”`} onPress={() => { setRingInfo(false); router.push({ pathname: '/project/[id]', params: { id: g.id } }); }} />)}
+            </>
+          ) : null;
+        })()}
+        <Muted style={{ marginTop: 10 }}>Tip: if a few loose tasks belong together, Organize can group them into a project.</Muted>
+      </Sheet>
       <OrganizeSheet visible={organizing} onClose={() => setOrganizing(false)} onApplied={(text, runId) => setOrganized({ text, runId })} />
 
       <Sheet visible={!!selected} onClose={() => setSelected(null)} title={selected?.action?.title}>
@@ -274,7 +341,7 @@ function WeekTab() {
           </View>
           <View style={{ flex: 1, alignItems: 'center' }}>
             <Text style={{ fontFamily: fonts.serif, fontSize: 30, color: colors.text }}>{advanced.size}</Text>
-            <Muted>goals advanced</Muted>
+            <Muted>projects moved</Muted>
           </View>
         </View>
       </Card>
@@ -355,5 +422,61 @@ function FromChat() {
         );
       })}
     </>
+  );
+}
+
+/** "Make a plan" for a pile-up: real deadlines in the order to do them, flexible ones moved to calmer days. */
+function CrunchSheet({ visible, load, onClose }: { visible: boolean; load: Crunch; onClose: () => void }) {
+  const store = useStore();
+  const [moved, setMoved] = useState<Set<string>>(new Set());
+  useEffect(() => { if (visible) setMoved(new Set()); }, [visible]);
+  const movingIds = new Set(load.movable.map((m) => m.item.action.id));
+  const doNow = load.items.filter((i) => !movingIds.has(i.action.id));
+  const move = async (m: Crunch['movable'][number]) => {
+    setMoved((s) => new Set(s).add(m.item.action.id));
+    // A task's own date moves the task; a date that comes from its project moves the project's target date.
+    if (m.item.action.due_date === m.item.date) await store.updateAction(m.item.action.id, { due_date: m.to, deadline_type: 'target' });
+    else if (m.item.goal) await store.updateGoal(m.item.goal.id, { deadline: m.to, deadline_type: 'target' });
+  };
+  const when = (d: number, date: string) => (d < 0 ? `was due ${friendlyDate(date)}` : d === 0 ? 'due today' : 'due tomorrow');
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Let’s make it manageable">
+      <Muted style={{ marginBottom: 12 }}>{load.advice}</Muted>
+      <Label>Do these, in this order</Label>
+      {doNow.map((i, n) => (
+        <View key={i.action.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }}>
+          <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: i.hard ? colors.amberSoft : colors.tealSoft, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.text }}>{n + 1}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Body numberOfLines={2}>{i.action.title}</Body>
+            <Muted>{i.goal ? `${i.goal.title} · ` : ''}{when(i.days, i.date)}{i.hard ? ' · real deadline' : ''} · {i.minutes} min</Muted>
+          </View>
+          <Pressable onPress={() => store.completeAction(i.action.id)} accessibilityRole="button" accessibilityLabel={`Mark ${i.action.title} done`} hitSlop={8}>
+            <Icon name="circle" color={colors.textMuted} />
+          </Pressable>
+        </View>
+      ))}
+      {load.movable.length > 0 && (
+        <>
+          <Label>Move to a calmer day</Label>
+          {load.movable.map((m) => (
+            <View key={m.item.action.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Body numberOfLines={2}>{m.item.goal && m.item.action.due_date !== m.item.date ? m.item.goal.title : m.item.action.title}</Body>
+                <Muted>Target date, {when(m.item.days, m.item.date)} · {m.item.minutes} min</Muted>
+              </View>
+              {moved.has(m.item.action.id)
+                ? <Muted style={{ color: colors.teal }}>Moved to {m.label}</Muted>
+                : <Chip label={`Move to ${m.label}`} onPress={() => move(m)} />}
+            </View>
+          ))}
+          {load.movable.length > 1 && load.movable.some((m) => !moved.has(m.item.action.id)) && (
+            <Button title={`Move all ${load.movable.length}`} variant="soft" onPress={() => load.movable.filter((m) => !moved.has(m.item.action.id)).forEach(move)} style={{ marginTop: 6 }} />
+          )}
+        </>
+      )}
+      <Button title="Done" onPress={onClose} style={{ marginTop: 10 }} />
+    </Sheet>
   );
 }

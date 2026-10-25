@@ -7,6 +7,7 @@ import { Banner, Body, Button, Card, Chip, Divider, Field, H1, Icon, IconButton,
 import { friendlyDate, shortDate, timeOfDay } from '../../src/core/dates';
 import { goalProgress } from '../../src/core/recommend';
 import { suggestWhy } from '../../src/core/rules';
+import { projectHealth } from '../../src/core/workload';
 import { suggestSteps } from '../../src/core/templates';
 import type { AccountabilityMode, Action, Goal, GoalStatus } from '../../src/core/types';
 import { api, friendlyAiError } from '../../src/lib/api';
@@ -83,6 +84,7 @@ export default function Project() {
   }
 
   const update = (p: Partial<Goal>) => store.updateGoal(goal.id, p);
+  const health = projectHealth(goal, store.actions, new Date(), store.accountability?.inactivity_days ?? 10);
 
   // Rule-based steps from the matching template (no AI needed), skipping ones the project already has.
   const fromTemplate = async () => {
@@ -188,6 +190,21 @@ export default function Project() {
       <Segmented value={tab} onChange={setTab} options={[{ value: 'overview', label: 'Overview' }, { value: 'steps', label: 'Steps' }, { value: 'notes', label: 'Notes' }, { value: 'files', label: 'Files' }]} style={{ marginBottom: 14 }} />
 
       {goal.status !== 'active' && <Banner tone="soft" text={`This project is ${STATUSES.find((s) => s.value === goal.status)?.label.toLowerCase()}. It won't appear in recommendations or reminders until it's active again.`} />}
+      {goal.status === 'active' && health.state !== 'on_track' && (
+        <Card style={{ backgroundColor: health.tone === 'warn' ? colors.amberSoft : health.tone === 'good' ? colors.tealSoft : colors.lavenderSoft, borderColor: 'transparent', paddingVertical: 14 }}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, letterSpacing: 0.5, color: health.tone === 'warn' ? '#B7791F' : health.tone === 'good' ? colors.teal : '#7A5FB8' }}>{health.label.toUpperCase()}</Text>
+          <Body style={{ marginTop: 4 }}>{health.message}</Body>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 }}>
+            {health.state === 'steps_done' && <Chip label="Mark project complete" onPress={() => { update({ status: 'completed' }); router.push({ pathname: '/celebrate', params: { goal: goal.id } }); }} />}
+            {(health.state === 'steps_done' || health.state === 'no_steps') && <Chip label="Add a step" onPress={() => setSheet('add')} />}
+            {health.state === 'no_steps' && <Chip label="Suggest steps" onPress={() => generate(false)} />}
+            {(health.state === 'overdue' || health.state === 'at_risk') && <Chip label="Change the date" onPress={() => setSheet('deadline')} />}
+            {health.state === 'at_risk' && <Chip label="Review the steps" onPress={() => setTab('steps')} />}
+            {(health.state === 'stalled' || health.state === 'all_waiting') && <Chip label="Find a smaller step" onPress={() => setSheet('add')} />}
+            {health.state === 'stalled' && <Chip label="Pause it for now" onPress={() => update({ status: 'paused' })} />}
+          </View>
+        </Card>
+      )}
 
       {tab === 'overview' && (
         <>

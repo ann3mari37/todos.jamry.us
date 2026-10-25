@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { handoffToDrafts, draftsToCommit, HandoffItem, type HandoffInterpretation } from '../../app/src/core/handoff';
 import { recommend, KIND_LABEL } from '../../app/src/core/recommend';
 import type { Action, Goal, LifeArea } from '../../app/src/core/types';
+import { crunch, projectHealth, staleTasks } from '../../app/src/core/workload';
 import type { Env } from './env';
 import { commitCapture, must, type Ctx } from './ops';
 import { autoOrganize } from './organize';
@@ -72,7 +73,7 @@ const TOOLS = [
   {
     name: 'get_overview',
     title: 'Read their Momentum lists',
-    description: "Returns the person's life areas, open projects (with progress and next steps) and open tasks, plus how many chat plans are waiting for their review. Call this first so you know what already exists before suggesting anything.",
+    description: "Returns the person's life areas, open projects (with health, progress and next steps) and open tasks, plus what needs attention: a pile-up of things due at once (with a suggested order and what could move), tasks that have been sitting a while (with a suggested way forward), and how many chat plans wait for review. Call this first so you know what already exists before suggesting anything.",
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
@@ -145,6 +146,7 @@ const INSTRUCTIONS = [
   'Call get_overview before suggesting things so you build on what already exists instead of duplicating it.',
   'When the plan feels right, call send_plan once with everything. It waits for their review in the app, so it is safe to be generous.',
   'Use add_task / create_project only for a single thing they clearly asked to add now.',
+  'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
 
 // ───────────────────────── tool handlers
@@ -176,12 +178,15 @@ async function overview(ctx: Ctx) {
   const { areas, goals, actions } = await load(ctx);
   const { count } = await ctx.db.from('capture_entries').select('id', { count: 'exact', head: true }).eq('source', 'chat').eq('status', 'interpreted');
   const open = actions.filter((a) => OPEN.includes(a.status));
+  const due = crunch(actions, goals);
+  const stale = staleTasks(actions, goals);
   return {
     life_areas: areas.map((a) => a.name),
     projects: goals.map((g) => {
       const steps = actions.filter((a) => a.goal_id === g.id);
       return {
         id: g.id, title: g.title, status: g.status, area: areaName(areas, g.life_area_id), why: g.meaning,
+        health: g.status === 'active' ? (({ label, message }) => ({ label, message }))(projectHealth(g, actions)) : null,
         due: g.deadline ? `${g.deadline}${g.deadline_type === 'hard' ? ' (hard deadline)' : ''}` : null,
         open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 8).map((a) => ({ id: a.id, title: a.title, minutes: a.estimated_minutes, waiting: a.status === 'waiting' })),
         last_progress: g.last_meaningful_progress_at?.slice(0, 10) ?? null,
@@ -193,6 +198,14 @@ async function overview(ctx: Ctx) {
       waiting: a.status === 'waiting', added: a.created_at.slice(0, 10),
     })),
     plans_waiting_for_review: count ?? 0,
+    attention: {
+      due_soon: due.level === 'calm' ? null : {
+        level: due.level, summary: due.headline, advice: due.advice,
+        order: due.items.map((i) => ({ task_id: i.action.id, title: i.action.title, due: i.date, hard_deadline: i.hard, minutes: i.minutes })),
+        could_move: due.movable.map((m) => ({ task_id: m.item.action.id, title: m.item.action.title, to: m.to })),
+      },
+      sitting_a_while: stale.slice(0, 10).map((s) => ({ task_id: s.action.id, title: s.action.title, days: s.days, suggestion: s.why })),
+    },
   };
 }
 
