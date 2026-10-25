@@ -11,7 +11,6 @@ const SECTIONS = [
   { key: 'notifications', icon: 'bell', title: 'Notifications', subtitle: 'Reminders and gentle check-ins' },
   { key: 'privacy', icon: 'lock', title: 'Privacy & Data', subtitle: 'Your data, export and deletion' },
   { key: 'appearance', icon: 'droplet', title: 'Appearance', subtitle: 'Motion and display' },
-  { key: 'voice', icon: 'mic', title: 'Voice & Input', subtitle: 'Speech-to-text settings' },
   { key: 'help', icon: 'help-circle', title: 'Help & Feedback', subtitle: 'How Momentum works' },
 ] as const;
 

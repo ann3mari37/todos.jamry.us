@@ -7,7 +7,6 @@ import { toISODate } from '../../src/core/dates';
 import { fallbackInterpret, guessLifeArea } from '../../src/core/fallback-capture';
 import { suggestSteps } from '../../src/core/templates';
 import { useStore, uuid } from '../../src/lib/store';
-import { useSpeech } from '../../src/lib/useSpeech';
 import { colors, fonts, radius, shadow } from '../../src/theme';
 
 type Draft = CaptureItem & { client_id: string; meaning: string; meaningful: boolean; matches_action_id: string | null };
@@ -37,7 +36,7 @@ export default function Capture() {
   const [notice, setNotice] = useState<string | null>(null);
   const [questions, setQuestions] = useState<string[]>([]);
   const [editing, setEditing] = useState<Draft | null>(null);
-  const [source, setSource] = useState<'text' | 'voice' | 'chat'>('text');
+  const [source, setSource] = useState<'text' | 'chat'>('text');
   // A plan sent from an AI chat, opened from Today's "From chat" card (?handoff=<id>).
   const handoff = params.handoff ? store.handoffs.find((h) => h.id === params.handoff) ?? null : null;
 
@@ -57,7 +56,6 @@ export default function Capture() {
     }
   }, [params.handoff, handoff, captureId, store.loading]);
 
-  const speech = useSpeech(useCallback((t: string) => { setSource('voice'); setText((prev) => (prev ? `${prev} ${t}` : t)); }, []));
 
   // Organizing is rule-based: instant, free, and works offline. You review everything before it's saved.
   const interpret = () => {
@@ -137,15 +135,6 @@ export default function Capture() {
 
       {!drafts && (
         <>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-            <Method icon="edit-2" label="Type" active={speech.state === 'idle'} onPress={() => {}} />
-            <Method icon={speech.state === 'listening' ? 'square' : 'mic'} label={speech.state === 'listening' ? 'Stop' : speech.state === 'transcribing' ? '…' : 'Speak'} active={speech.state !== 'idle'} onPress={speech.toggle} />
-            <Method icon="camera" label="Photo" onPress={() => setNotice('Photo capture is planned for a later phase. For now, type or speak it.')} />
-            <Method icon="paperclip" label="File" onPress={() => setNotice('File attachments are planned for a later phase.')} />
-          </View>
-          {speech.state === 'listening' && <Banner text="Listening… tap Stop when you're done." />}
-          {speech.state === 'transcribing' && <Banner text="Turning your words into text…" />}
-          {speech.error && <Banner tone="soft" text={speech.error} />}
           <View style={[{ backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 14, minHeight: 150 }, shadow]}>
             <TextInput
               value={text}
@@ -168,7 +157,7 @@ export default function Capture() {
             </Pressable>
           </View>
           {notice && <Banner tone="soft" text={notice} />}
-          <Button variant="ghost" title={mode === 'did' ? 'Add one by hand' : 'Skip AI and add by hand'} onPress={addManual} />
+          <Button variant="ghost" title="Add one by hand" onPress={addManual} />
         </>
       )}
 
@@ -198,15 +187,6 @@ export default function Capture() {
 
       <EditDraft draft={editing} onClose={() => setEditing(null)} onSave={(d) => { update(d); setEditing(null); }} onRemove={(d) => { remove(d); setEditing(null); }} />
     </Screen>
-  );
-}
-
-function Method({ icon, label, onPress, active }: { icon: IconName; label: string; onPress: () => void; active?: boolean }) {
-  return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={[{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: radius.md, backgroundColor: active ? colors.pinkWash : colors.card, borderWidth: 1, borderColor: active ? colors.pinkSoft : colors.border, gap: 6 }]}>
-      <Icon name={icon} size={22} color={active ? colors.pink : colors.text} />
-      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: active ? colors.pinkDeep : colors.text }}>{label}</Text>
-    </Pressable>
   );
 }
 
