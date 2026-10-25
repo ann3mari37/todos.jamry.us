@@ -11,12 +11,13 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type StyleProp,
   type TextInputProps,
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, radius, shadow } from '../theme';
 
 export type IconName = React.ComponentProps<typeof Feather>['name'];
@@ -207,17 +208,25 @@ export function Field(props: TextInputProps & { label?: string }) {
 }
 
 /** Bottom sheet used for edits and choices (cross-platform replacement for Alert.prompt). */
+// On the web the sheet must sit above the fixed tab bar and fill the viewport.
+const WEB_OVERLAY = (Platform.OS === 'web' ? { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 } : {}) as unknown as ViewStyle;
+
 export function Sheet({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title?: string; children: React.ReactNode }) {
+  // Sized from the real screen height: a percentage of an auto-sized parent collapses on the web and cuts content off.
+  const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: 'rgba(43,39,48,0.28)' }} onPress={onClose} accessibilityLabel="Close" />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 34, maxHeight: '88%', width: '100%', maxWidth: 560, alignSelf: 'center' }}>
-          <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 12 }} />
-          {title && <H2 style={{ marginBottom: 12 }}>{title}</H2>}
-          <ScrollView keyboardShouldPersistTaps="handled">{children}</ScrollView>
-        </View>
-      </KeyboardAvoidingView>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <View style={[{ flex: 1, justifyContent: 'flex-end' }, WEB_OVERLAY]}>
+        <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(43,39,48,0.28)' }]} onPress={onClose} accessibilityLabel="Close" />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Math.max(insets.bottom, 12) + 20, maxHeight: Math.round(height * 0.88), width: '100%', maxWidth: 560, alignSelf: 'center' }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 12 }} />
+            {title && <H2 style={{ marginBottom: 12 }}>{title}</H2>}
+            <ScrollView style={{ flexGrow: 0 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{children}</ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
