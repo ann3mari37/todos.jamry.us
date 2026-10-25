@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useAutoUpdate } from '../src/components/SyncStatus';
 import { StoreProvider } from '../src/lib/store';
 import { colors } from '../src/theme';
 
@@ -22,6 +23,7 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 }
 
 export default function RootLayout() {
+  useAutoUpdate();
   const [loaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, PlayfairDisplay_600SemiBold, PlayfairDisplay_700Bold });
   if (!loaded) {
     return (

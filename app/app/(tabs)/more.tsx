@@ -3,6 +3,7 @@ import React from 'react';
 import { View } from 'react-native';
 import { Card, Divider, H1, Muted, Row, Screen } from '../../src/components/ui';
 import { useEmailAvailable } from '../../src/components/EmailBits';
+import { SyncStatus } from '../../src/components/SyncStatus';
 import { useStore } from '../../src/lib/store';
 import { colors } from '../../src/theme';
 
@@ -49,6 +50,7 @@ export default function More() {
         <Row icon="log-out" title="Sign out" onPress={async () => { await store.signOut(); router.replace('/welcome'); }} />
       </Card>
       <Muted style={{ textAlign: 'center', marginTop: 8 }}>{store.session?.user.email}</Muted>
+      <SyncStatus />
     </Screen>
   );
 }

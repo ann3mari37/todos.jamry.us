@@ -132,6 +132,9 @@ function useStoreValue() {
   const [loading, setLoading] = useState(true);
   const [online, setOnline] = useState(true);
   const [pending, setPending] = useState(0);
+  // When this device last loaded fresh data, and why the last load failed (shown on Today and in Settings).
+  const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<null | 'signed_out' | 'failed'>(null);
   const flushing = useRef(false);
   // Most recent automatic organization, shown once on Today with an Undo.
   const [lastOrganized, setLastOrganized] = useState<OrganizeRun | null>(null);
@@ -162,6 +165,7 @@ function useStoreValue() {
       }
     }).catch(() => {});
     AsyncStorage.getItem(OUTBOX_KEY).then((raw) => setPending(raw ? JSON.parse(raw).length : 0)).catch(() => {});
+    AsyncStorage.getItem('momentum.lastSynced').then((v) => v && setLastSynced((cur) => cur ?? v)).catch(() => {});
   }, []);
 
   const save = useCallback((next: Snapshot) => {
@@ -256,12 +260,25 @@ function useStoreValue() {
       setData(next);
       save(next);
       setOnline(true);
+      const at = new Date().toISOString();
+      setLastSynced(at);
+      setSyncError(null);
+      AsyncStorage.setItem('momentum.lastSynced', at).catch(() => {});
       // Keep the profile's time zone current, so the Worker and AI connector know what "today" means for this person.
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       if (tz && next.profile && next.profile.timezone !== tz) supabase.from('profiles').update({ timezone: tz }).eq('id', session.user.id).then(() => {});
     } catch (e) {
+      const msg = String((e as Error)?.message ?? e);
       if (isNetworkError(e)) setOnline(false);
-      else console.warn('refresh failed', (e as Error).message);
+      else if (/jwt|expired|not authenticated|invalid claim|401|refresh token/i.test(msg)) {
+        // An expired sign-in used to fail silently and leave this device on old data. Try to renew it once; if that
+        // fails, say so instead of showing stale data as if it were current.
+        const { error } = await supabase.auth.refreshSession();
+        setSyncError(error ? 'signed_out' : 'failed');
+      } else {
+        setSyncError('failed');
+        console.warn('refresh failed', msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -563,14 +580,14 @@ function useStoreValue() {
   }, [refresh, session]);
 
   return useMemo(() => ({
-    session, authReady, loading, online, pending, ...data, lastOrganized, setLastOrganized,
+    session, authReady, loading, online, pending, lastSynced, syncError, ...data, lastOrganized, setLastOrganized,
     refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture, updateAccomplishment, deleteAccomplishment,
     createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge, upsertLifeArea, deleteLifeArea,
     updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
     dismissHandoff, chatConnections, revokeChat, saveCheckin, pinForTomorrow,
     organizePreview, organizeApply, organizeUndo,
     emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount, emailSync, emailRefreshDigest, emailThread, emailModify,
-  }), [session, authReady, loading, online, pending, data, lastOrganized, refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
+  }), [session, authReady, loading, online, pending, lastSynced, syncError, data, lastOrganized, refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
     updateAccomplishment, deleteAccomplishment, createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge,
     upsertLifeArea, deleteLifeArea, updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
     dismissHandoff, chatConnections, revokeChat, saveCheckin, pinForTomorrow,

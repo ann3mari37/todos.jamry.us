@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { InboxTaskCard } from '../../src/components/EmailBits';
+import { SyncProblemBanner, SyncStatus } from '../../src/components/SyncStatus';
 import { Flower } from '../../src/components/Flower';
 import { FlowerArt } from '../../src/components/FlowerArt';
 import { EditTask } from '../../src/components/EditTask';
@@ -132,6 +133,7 @@ export default function Today() {
       </View>
 
       {!store.online && <Banner tone="soft" text={`You're offline. Changes are saved on this device${store.pending ? ` (${store.pending} waiting to sync)` : ''}.`} />}
+      <SyncProblemBanner />
       <FromChat />
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 18 }}>
@@ -317,6 +319,7 @@ export default function Today() {
           ))}
           {store.accomplishments.length === 0 && <Muted>Everything you do counts — planned or not.</Muted>}
           <Button title="Look What I Did" icon="star" variant="soft" style={{ marginTop: 14 }} onPress={() => router.push({ pathname: '/capture', params: { mode: 'did' } })} />
+          <SyncStatus />
         </>
       )}
 
