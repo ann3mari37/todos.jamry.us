@@ -171,8 +171,8 @@ describe('filter row (one category)', () => {
 describe('mockup-style mix', () => {
   it('shows one of each kind, in mockup order, for a plain list of standalone tasks', () => {
     const tasks = [
-      action({ title: 'Update my crm', estimated_minutes: null, created_at: '2026-10-14T10:00:00Z' }),
-      action({ title: 'Clean my laundry', estimated_minutes: null, created_at: '2026-10-14T10:00:00Z' }),
+      action({ title: 'Update my crm', estimated_minutes: null, created_at: '2026-10-14T00:00:00Z' }),
+      action({ title: 'Clean my laundry', estimated_minutes: null, created_at: '2026-10-14T00:00:00Z' }),
       action({ title: 'Cook dinner', estimated_minutes: null, created_at: '2026-10-19T10:00:00Z' }),
       action({ title: 'Pay rent', estimated_minutes: 10, due_date: '2026-10-25', deadline_type: 'target', created_at: '2026-10-19T10:00:00Z' }),
       action({ title: 'Write a business plan', estimated_minutes: 90, created_at: '2026-10-19T10:00:00Z' }),
