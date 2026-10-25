@@ -45,10 +45,10 @@ export function usePlan() {
     AsyncStorage.setItem(key(today), JSON.stringify(p)).catch(() => {});
   }, [today]);
 
-  const compute = useCallback((mode: DailyMode | null, exclude: string[] = []): Recommendation[] =>
+  const compute = useCallback((mode: DailyMode | null, exclude: string[] = [], onlyKind: RecommendationKind | null = null): Recommendation[] =>
     recommend({
       goals: store.goals, actions: store.actions, dependencies: store.dependencies, feedback: store.feedback,
-      mode, excludeActionIds: exclude, inactivityDays: store.accountability?.inactivity_days, lifeAreas: store.lifeAreas,
+      mode, onlyKind, excludeActionIds: exclude, inactivityDays: store.accountability?.inactivity_days, lifeAreas: store.lifeAreas,
     }), [store.goals, store.actions, store.dependencies, store.feedback, store.accountability, store.lifeAreas]);
 
   const toPick = (r: Recommendation): Pick => ({ kind: r.kind, action_id: r.action?.id ?? null, goal_id: r.goal?.id ?? null, reason: r.reason });
@@ -81,13 +81,15 @@ export function usePlan() {
     persist({ date: today, mode, picks: recs.map(toPick), shown: recs.map((r) => r.action?.id).filter(Boolean) as string[], builtAt: new Date().toISOString() });
   }, [compute, persist, today]);
 
-  /** "Show me something else": swap one pick for a fresh suggestion. */
+  /** "Next" / "Show me something else": swap one pick for the next suggestion of the same kind (any kind if none left). */
   const swap = useCallback((pick: Pick) => {
     if (!plan) return false;
     const exclude = [...plan.shown, ...plan.picks.map((p) => p.action_id).filter(Boolean) as string[]];
     const pickedGoals = new Set(plan.picks.filter((p) => p !== pick).map((p) => p.goal_id));
+    const sameKind = compute(null, exclude, pick.kind).filter((r) => r.action);
     const candidates = compute(plan.mode, exclude);
-    const next = candidates.find((r) => r.action && !pickedGoals.has(r.goal?.id ?? null)) ?? candidates.find((r) => r.action);
+    const next = sameKind.find((r) => !pickedGoals.has(r.goal?.id ?? null)) ?? sameKind[0]
+      ?? candidates.find((r) => r.action && !pickedGoals.has(r.goal?.id ?? null)) ?? candidates.find((r) => r.action);
     const picks = plan.picks.filter((p) => p !== pick);
     if (next) picks.splice(plan.picks.indexOf(pick), 0, toPick(next));
     persist({ ...plan, picks, shown: [...plan.shown, ...(next?.action ? [next.action.id] : [])] });
@@ -113,8 +115,13 @@ export function usePlan() {
     goal: p.goal_id ? store.goals.find((g) => g.id === p.goal_id) ?? null : null,
   })).filter((x) => (x.pick.action_id ? x.action && x.action.status !== 'dismissed' : x.goal && x.goal.status === 'active')), [plan, store.actions, store.goals]);
 
+  /** Filter row: every current suggestion of one kind, live (not fixed for the day). */
+  const byKind = useCallback((kind: RecommendationKind) => compute(null, [], kind).map((r) => ({
+    pick: toPick(r), action: r.action, goal: r.goal,
+  })), [compute]);
+
   const actionable = resolved.filter((r) => r.action);
   const finished = actionable.length > 0 && actionable.every((r) => r.action!.status === 'completed');
 
-  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, swap, remove, addMore };
+  return { ready, plan, picks: resolved, finished, mode: plan?.mode ?? null, setMode, swap, remove, addMore, byKind };
 }

@@ -1,26 +1,27 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { DigestCard } from '../../src/components/EmailBits';
 import { Flower } from '../../src/components/Flower';
 import { FlowerArt } from '../../src/components/FlowerArt';
 import { OrganizeSheet } from '../../src/components/OrganizeSheet';
 import { TaskList, useOpenTasks } from '../../src/components/TaskList';
 import { Ring } from '../../src/components/Ring';
-import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption, type IconName } from '../../src/components/ui';
+import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay } from '../../src/core/dates';
 import { KIND_LABEL, readyActions, remainingSteps } from '../../src/core/recommend';
-import type { DailyMode } from '../../src/core/types';
+import type { RecommendationKind } from '../../src/core/types';
 import { useStore } from '../../src/lib/store';
 import { usePlan, type Pick } from '../../src/lib/usePlan';
 import { colors, fonts, KIND_STYLE, radius } from '../../src/theme';
 
-const MODES: { value: DailyMode; label: string; hint: string; icon: IconName }[] = [
-  { value: 'meaningful', label: 'Move something meaningful', hint: 'Projects that matter, bigger tasks', icon: 'heart' },
-  { value: 'small_tasks', label: 'A few small tasks', hint: 'Your quickest wins, 15 min or less', icon: 'feather' },
-  { value: 'off_my_mind', label: 'Get something off my mind', hint: 'Overdue, waiting, and oldest items', icon: 'wind' },
-  { value: 'show_all', label: "Show me what's available", hint: 'Everything ready right now', icon: 'list' },
+const FILTERS: { kind: RecommendationKind; label: string }[] = [
+  { kind: 'time_sensitive', label: 'Time-sensitive' },
+  { kind: 'meaningful_move', label: 'Meaningful' },
+  { kind: 'easy_momentum', label: 'Quick wins' },
+  { kind: 'quietly_waiting', label: 'Waiting' },
+  { kind: 'next_up', label: 'Next up' },
 ];
 
 export default function Today() {
@@ -29,6 +30,17 @@ export default function Today() {
   const [tab, setTab] = useState<'today' | 'week' | 'areas'>('today');
   const [selected, setSelected] = useState<(typeof plan.picks)[number] | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [filter, setFilter] = useState<RecommendationKind | null>(null);
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  // Day types were replaced by the filter row; clear one left over from earlier today.
+  useEffect(() => { if (plan.mode) plan.setMode(null); }, [plan.mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.kind, plan.byKind(f.kind).length])) as Record<RecommendationKind, number>,
+    [plan.byKind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shownPicks = filter ? plan.byKind(filter).filter((x) => !skipped.has(x.action?.id ?? x.goal?.id ?? '')) : plan.picks;
+  const next = (x: (typeof shownPicks)[number]) => {
+    if (filter) setSkipped((s) => new Set(s).add(x.action?.id ?? x.goal?.id ?? ''));
+    else if (!plan.swap(x.pick)) setNote("That's everything that's ready right now.");
+  };
   const [organizing, setOrganizing] = useState(false);
   const [organized, setOrganized] = useState<{ text: string; runId: string } | null>(null);
 
@@ -144,9 +156,9 @@ export default function Today() {
             </Card>
           )}
 
-          <DayType mode={plan.mode} onChange={(m) => { plan.setMode(m); setNote(null); }} />
+          <FilterRow value={filter} counts={counts} onChange={(f) => { setFilter(f); setSkipped(new Set()); setNote(null); }} />
 
-          {plan.finished && (
+          {!filter && plan.finished && (
             <Card style={{ backgroundColor: colors.pinkWash, alignItems: 'center', paddingVertical: 22 }}>
               <Flower size={64} seed={2} />
               <Text style={{ fontFamily: fonts.serif, fontSize: 22, color: colors.text, marginTop: 8 }} accessibilityRole="header">Finished for now</Text>
@@ -157,7 +169,7 @@ export default function Today() {
             </Card>
           )}
 
-          {plan.picks.map(({ pick, action, goal }, i) => {
+          {shownPicks.map(({ pick, action, goal }, i) => {
             const style = KIND_STYLE[pick.kind];
             const done = action?.status === 'completed';
             const steps = goal ? remainingSteps(goal.id, store.actions) : 0;
@@ -178,6 +190,12 @@ export default function Today() {
                     <Body style={{ fontFamily: fonts.medium, fontSize: 17, marginTop: 2, textDecorationLine: done ? 'line-through' : 'none' }}>{action?.title ?? goal?.title}</Body>
                     {action && goal && pick.kind !== 'time_sensitive' && pick.kind !== 'quietly_waiting' && <Muted style={{ marginTop: 2 }} numberOfLines={1}>{goal.title}</Muted>}
                     <Muted style={{ marginTop: 4 }} numberOfLines={2}>{sub}</Muted>
+                    {!done && (
+                      <Pressable onPress={() => next({ pick, action, goal })} accessibilityRole="button" accessibilityLabel={`Next ${KIND_LABEL[pick.kind]} suggestion`} hitSlop={8} style={{ alignSelf: 'flex-start', marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 28 }}>
+                        <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>Next {KIND_LABEL[pick.kind].toLowerCase()}</Text>
+                        <Icon name="chevron-right" size={13} color={colors.textMuted} />
+                      </Pressable>
+                    )}
                   </View>
                   <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
                     <Icon name="chevron-right" size={18} color={colors.textFaint} />
@@ -188,7 +206,12 @@ export default function Today() {
             );
           })}
 
-          {plan.ready && plan.picks.length === 0 && !store.loading && (
+          {filter && shownPicks.length === 0 && (
+            <Card style={{ alignItems: 'center', paddingVertical: 20 }}>
+              <Muted style={{ textAlign: 'center' }}>Nothing else in {FILTERS.find((f) => f.kind === filter)?.label.toLowerCase()} right now.</Muted>
+            </Card>
+          )}
+          {!filter && plan.ready && plan.picks.length === 0 && !store.loading && (
             <Card style={{ alignItems: 'center', paddingVertical: 26 }}>
               <Body style={{ fontFamily: fonts.medium, textAlign: 'center' }}>{store.goals.length || store.actions.length ? 'Nothing needs you right now.' : "Let's start with what's on your mind."}</Body>
               <Muted style={{ textAlign: 'center', marginTop: 6 }}>Capture a goal, a task, or something you already did.</Muted>
@@ -286,42 +309,19 @@ function AreasTab() {
   );
 }
 
-/** "What kind of day is it?" — each choice swaps in its own set of 3–5 suggestions. */
-function DayType({ mode, onChange }: { mode: DailyMode | null; onChange: (m: DailyMode | null) => void }) {
-  const current = MODES.find((m) => m.value === mode);
-  if (current) {
-    return (
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.pinkWash, borderRadius: radius.lg, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12 }}>
-        <Icon name={current.icon} size={18} color={colors.pinkDeep} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: fonts.semibold, color: colors.pinkDeep, fontSize: 14 }}>{current.label}</Text>
-          <Muted style={{ fontSize: 12 }}>{current.hint}</Muted>
-        </View>
-        <Pressable onPress={() => onChange(null)} accessibilityRole="button" hitSlop={8} style={{ minHeight: 36, justifyContent: 'center' }}>
-          <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep, fontSize: 13 }}>Usual picks</Text>
-        </Pressable>
-      </View>
-    );
-  }
+/** Filter row: the mixed list by default; tap a category to see every suggestion of that kind. */
+function FilterRow({ value, counts, onChange }: { value: RecommendationKind | null; counts: Record<RecommendationKind, number>; onChange: (k: RecommendationKind | null) => void }) {
+  const chip = (key: string, label: string, on: boolean, onPress: () => void, color: string) => (
+    <Pressable key={key} onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: on }}
+      style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, marginRight: 8, borderWidth: 1, borderColor: on ? color : colors.border, backgroundColor: on ? color : colors.card }}>
+      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: on ? colors.white : colors.text }}>{label}</Text>
+    </Pressable>
+  );
   return (
-    <Card style={{ paddingBottom: 8 }}>
-      <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.text }}>What kind of day is it?</Text>
-      <Muted style={{ marginTop: 2, marginBottom: 10 }}>Pick one and your suggestions change to fit.</Muted>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {MODES.map((m) => (
-          <Pressable
-            key={m.value}
-            onPress={() => onChange(m.value)}
-            accessibilityRole="button"
-            accessibilityLabel={`${m.label}. ${m.hint}`}
-            style={({ pressed }) => [{ flexBasis: '48%', flexGrow: 1, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.cardSoft, padding: 12, minHeight: 72 }, pressed && { opacity: 0.7 }]}
-          >
-            <Icon name={m.icon} size={18} color={colors.pink} />
-            <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text, marginTop: 6 }}>{m.label}</Text>
-            <Muted style={{ fontSize: 11, marginTop: 2 }}>{m.hint}</Muted>
-          </Pressable>
-        ))}
-      </View>
-    </Card>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12, flexGrow: 0 }} accessibilityRole="tablist">
+      {chip('all', 'All', value === null, () => onChange(null), colors.pink)}
+      {FILTERS.filter((f) => counts[f.kind] > 0).map((f) =>
+        chip(f.kind, `${f.label} · ${counts[f.kind]}`, value === f.kind, () => onChange(value === f.kind ? null : f.kind), KIND_STYLE[f.kind].color))}
+    </ScrollView>
   );
 }

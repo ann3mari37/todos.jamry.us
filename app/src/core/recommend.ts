@@ -21,6 +21,8 @@ export interface RecommendInput {
   feedback?: FeedbackEntry[];
   now?: Date;
   mode?: DailyMode | null;
+  /** Filter: return every candidate of this one category, best first, instead of the mixed list. */
+  onlyKind?: RecommendationKind | null;
   /** Actions the user asked to swap out ("Show me something else"). */
   excludeActionIds?: string[];
   /** Days without meaningful progress before a goal is "quietly waiting". */
@@ -157,13 +159,15 @@ export function recommend(input: RecommendInput): Recommendation[] {
       dated.push({ g, a, d: deadlineDays(g, now)!, hard: g.deadline_type === 'hard', label: g.title, date: g.deadline!, left: remainingSteps(g.id, input.actions) });
     }
   }
-  const ts = dated.sort((x, y) => (x.d < 0 ? 0 : 1) - (y.d < 0 ? 0 : 1) || (x.hard ? 0 : 1) - (y.hard ? 0 : 1) || x.d - y.d)[0];
-  if (ts) {
-    const when = ts.d < 0 ? `was due ${friendlyDate(ts.date, now)}` : ts.d === 0 ? 'is due today' : `is due ${friendlyDate(ts.date, now)}`;
-    const kindWord = ts.hard ? '' : ' (target date)';
-    const steps = ts.left !== null ? ` ${ts.left} step${ts.left === 1 ? '' : 's'} left.` : minutes(ts.a) <= 15 ? ` About ${minutes(ts.a)} min.` : '';
-    take('time_sensitive', ts.g, ts.a, `${ts.label} ${when}${kindWord}.${steps}`, 100 - ts.d);
-  }
+  dated.sort((x, y) => (x.d < 0 ? 0 : 1) - (y.d < 0 ? 0 : 1) || (x.hard ? 0 : 1) - (y.hard ? 0 : 1) || x.d - y.d);
+  const tsReason = (x: (typeof dated)[number]) => {
+    const when = x.d < 0 ? `was due ${friendlyDate(x.date, now)}` : x.d === 0 ? 'is due today' : `is due ${friendlyDate(x.date, now)}`;
+    const kindWord = x.hard ? '' : ' (target date)';
+    const steps = x.left !== null ? ` ${x.left} step${x.left === 1 ? '' : 's'} left.` : minutes(x.a) <= 15 ? ` About ${minutes(x.a)} min.` : '';
+    return `${x.label} ${when}${kindWord}.${steps}`;
+  };
+  const ts = dated[0];
+  if (ts) take('time_sensitive', ts.g, ts.a, tsReason(ts), 100 - ts.d);
 
   // ── Meaningful Move: the project most worth a step today. Scored, highest wins:
   //    user-stated meaning +15 (suggested meaning +8) · "keep visible"/"help me" +10 · "I tend to avoid this" +12
@@ -273,6 +277,49 @@ export function recommend(input: RecommendInput): Recommendation[] {
       ?? (g ? `Next step on "${g.title}".` : `About ${minutes(a)} min.`);
   };
 
+  // ── Filter row: one category, every candidate of it, best first. Uses the same rules as the mixed list.
+  if (input.onlyKind) {
+    const list: Recommendation[] = [];
+    const add = (kind: RecommendationKind, g: Goal | null, a: Action | null, reason: string, score: number) => {
+      if (list.length < 8 && !(a && list.some((r) => r.action?.id === a.id)) && !(!a && g && list.some((r) => r.goal?.id === g.id))) {
+        list.push({ kind, goal: g, action: a, reason, score });
+      }
+    };
+    const base = { ...input, onlyKind: null };
+    switch (input.onlyKind) {
+      case 'time_sensitive':
+        for (const x of dated) add('time_sensitive', x.g, x.a, tsReason(x), 100 - x.d);
+        break;
+      case 'meaningful_move':
+        return recommend({ ...base, mode: 'meaningful' }).slice(0, 8);
+      case 'easy_momentum':
+        return recommend({ ...base, mode: 'small_tasks' });
+      case 'quietly_waiting': {
+        const quiet = input.goals
+          .filter((g) => g.status === 'active' && goalIsEligible(g, now) && g.accountability !== 'do_not_remind')
+          .map((g) => ({ g, idle: daysSince(g.last_meaningful_progress_at ?? g.created_at, now) ?? 0 }))
+          .sort((x, y) => y.idle - x.idle);
+        for (const q of quiet.filter((x) => isMeaningful(x.g) && x.idle >= inactivity)) add('quietly_waiting', q.g, firstStep(q.g.id), "Hasn't made progress recently.", 20);
+        for (const a of input.actions.filter((x) => x.status === 'waiting' && !resting.has(x.id))) {
+          const days = daysSince(a.created_at, now) ?? 0;
+          if (days >= 3) add('quietly_waiting', goalOf(a), a, `You've been waiting on this for ${days} days. Time to follow up?`, 19);
+        }
+        for (const q of quiet.filter((x) => !isMeaningful(x.g) && x.idle >= inactivity * 2)) {
+          if (remainingSteps(q.g.id, input.actions) > 0) add('quietly_waiting', q.g, firstStep(q.g.id), `No progress in ${q.idle} days. One small step would wake it up.`, 18);
+        }
+        for (const a of ready.filter((x) => !x.goal_id).sort((x, y) => x.created_at.localeCompare(y.created_at))) {
+          const days = daysSince(a.created_at, now) ?? 0;
+          if (days >= 14) add('quietly_waiting', null, a, `On your list for ${days} days. Still want it?`, 17);
+        }
+        break;
+      }
+      case 'next_up':
+        for (const a of nextUp(new Set())) add('next_up', goalOf(a), a, whyFor(a), 10);
+        break;
+    }
+    return list;
+  }
+
   // ── Day types reshape the whole list (3–5 suggestions each) instead of adding a couple of extras.
   if (input.mode === 'small_tasks') {
     // The quickest things available, shortest first.
@@ -321,7 +368,8 @@ export function recommend(input: RecommendInput): Recommendation[] {
   }
 
   const shown = new Set(out.map((r) => r.action?.id).filter(Boolean) as string[]);
-  const fillTo = input.mode === 'show_all' ? 12 : 3;
+  // A mix: one from each category that has something, then Next Up so there are at least 4 to choose from.
+  const fillTo = input.mode === 'show_all' ? 12 : 4;
   for (const a of nextUp(shown)) {
     if (out.length >= fillTo) break;
     take('next_up', goalOf(a), a, whyFor(a), 10);

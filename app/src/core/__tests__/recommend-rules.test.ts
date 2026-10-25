@@ -105,9 +105,9 @@ describe('Next Up and day types', () => {
   ];
   const areas = [{ id: 'work', name: 'Work' }];
 
-  it('never leaves Today empty: fills to 3 with Next Up', () => {
+  it('never leaves Today empty: a mix of at least 4, filled with Next Up', () => {
     const recs = recommend({ goals: [], actions: mine(), now: NOW, lifeAreas: areas });
-    expect(recs).toHaveLength(3);
+    expect(recs).toHaveLength(4);
     expect(recs.some((r) => r.kind === 'easy_momentum')).toBe(true);
     expect(recs.filter((r) => r.kind === 'next_up').length).toBeGreaterThan(0);
   });
@@ -132,5 +132,38 @@ describe('Next Up and day types', () => {
   });
   it('"Show me what\'s available" lists everything ready', () => {
     expect(recommend({ goals: [], actions: mine(), now: NOW, mode: 'show_all' })).toHaveLength(4);
+  });
+});
+
+describe('filter row (one category)', () => {
+  const g = goal({ title: 'Launch website', meaning: 'My business', meaning_source: 'user' });
+  const all = () => [
+    action({ title: 'Pay rent', due_date: '2026-10-22', deadline_type: 'hard' }),
+    action({ title: 'Return book', due_date: '2026-10-19', deadline_type: 'target' }),
+    action({ title: 'Write headline', goal_id: g.id, estimated_minutes: 40 }),
+    action({ title: 'Wipe counter', estimated_minutes: 5 }),
+    action({ title: 'Call dentist', estimated_minutes: 10 }),
+    action({ title: 'Hear back from landlord', status: 'waiting', created_at: '2026-10-12T00:00:00Z' }),
+  ];
+  it('the mixed list covers several categories', () => {
+    const kinds = new Set(recommend({ goals: [g], actions: all(), now: NOW }).map((r) => r.kind));
+    expect(kinds.size).toBeGreaterThanOrEqual(3);
+  });
+  it('Time-sensitive lists every dated task, overdue first', () => {
+    const recs = recommend({ goals: [g], actions: all(), now: NOW, onlyKind: 'time_sensitive' });
+    expect(recs.map((r) => r.action?.title)).toEqual(['Return book', 'Pay rent']);
+  });
+  it('Quick wins lists all the short tasks', () => {
+    const recs = recommend({ goals: [g], actions: all(), now: NOW, onlyKind: 'easy_momentum' });
+    expect(recs.map((r) => r.action?.title).sort()).toEqual(['Call dentist', 'Pay rent', 'Return book', 'Wipe counter'].sort());
+  });
+  it('Waiting lists follow-ups', () => {
+    const recs = recommend({ goals: [g], actions: all(), now: NOW, onlyKind: 'quietly_waiting' });
+    expect(recs[0].action?.title).toBe('Hear back from landlord');
+  });
+  it('every filtered item is of the chosen kind', () => {
+    for (const kind of ['time_sensitive', 'meaningful_move', 'easy_momentum', 'quietly_waiting', 'next_up'] as const) {
+      expect(recommend({ goals: [g], actions: all(), now: NOW, onlyKind: kind }).every((r) => r.kind === kind)).toBe(true);
+    }
   });
 });

@@ -130,13 +130,18 @@ export default function EmailAccounts() {
       </Muted>
 
       <Sheet visible={adding && !imap} onClose={() => setAdding(false)} title="Add an email account">
+        {available && !available.imap && (
+          <Banner tone="soft" text="Email isn't switched on for this app yet. The server needs its email encryption key before any inbox can be connected. It's a one-time setup step for the app's owner (see docs/OPERATIONS.md, Email setup)." />
+        )}
+        {available && available.imap && (!available.gmail || !available.outlook) && (
+          <Banner tone="soft" text={`${[!available.gmail && 'Google', !available.outlook && 'Microsoft'].filter(Boolean).join(' and ')} sign-in isn't set up on the server yet, so ${!available.gmail && !available.outlook ? 'those buttons are' : 'that button is'} greyed out. You can still connect any inbox below with an app password, including Gmail.`} />
+        )}
         <ProviderButton icon="mail" title="Gmail or Google Workspace" subtitle="Sign in with Google" disabled={available ? !available.gmail : false} onPress={() => connect('gmail')} />
         <ProviderButton icon="inbox" title="Outlook, Hotmail or Microsoft 365" subtitle="Sign in with Microsoft" disabled={available ? !available.outlook : false} onPress={() => connect('outlook')} />
         <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.textMuted, marginTop: 14, marginBottom: 6 }}>OTHER PROVIDERS (IMAP)</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', opacity: available && !available.imap ? 0.45 : 1 }} pointerEvents={available && !available.imap ? 'none' : 'auto'}>
           {IMAP_PRESETS.map((p) => <Chip key={p.key} label={p.label} onPress={() => setImap(p)} />)}
         </View>
-        {available && !available.gmail && !available.outlook && <Banner tone="soft" text="Google and Microsoft sign-in aren't configured on the server yet. IMAP accounts still work." />}
       </Sheet>
 
       <ImapSheet preset={imap} onClose={() => setImap(null)} onDone={() => { setImap(null); setAdding(false); setNotice('Connected. Syncing your recent mail…'); store.emailSync(true).catch(() => {}); }} />
