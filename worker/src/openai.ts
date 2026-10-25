@@ -83,9 +83,11 @@ export async function callStructured<T>(env: Env, call: StructuredCall<T>): Prom
       const latency = Date.now() - started;
       if (!res.ok) {
         // OpenAI uses 429 both for "slow down" and for "account has no credit"; only the first is worth retrying.
-        const errCode = res.status === 429 ? ((await res.json().catch(() => null)) as { error?: { code?: string } } | null)?.error?.code : undefined;
+        // Log OpenAI's machine-readable reason (e.g. rate_limit_exceeded, model_not_found) — never message text.
+        const body = (await res.json().catch(() => null)) as { error?: { code?: string | null; type?: string | null } } | null;
+        const errCode = body?.error?.code ?? body?.error?.type ?? undefined;
         const noCredit = errCode === 'insufficient_quota';
-        lastErr = noCredit ? 'openai_insufficient_quota' : `openai_${res.status}`;
+        lastErr = noCredit ? 'openai_insufficient_quota' : `openai_${res.status}${errCode ? `_${String(errCode).slice(0, 40)}` : ''}`;
         await log(env, { user_id: call.userId, operation: call.operation, model, prompt_version: call.promptVersion, status: res.status === 429 ? 'rate_limited' : 'error', latency_ms: latency, error_code: lastErr });
         if (noCredit) throw new HttpError(503, 'ai_quota', lastErr);
         if (res.status === 429) { await new Promise((r) => setTimeout(r, 1500)); continue; }
