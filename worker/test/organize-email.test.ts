@@ -5,7 +5,7 @@ import { GmailProvider } from '../src/email/gmail';
 import { fetchMap, parseItems, quote } from '../src/email/imap';
 import { decodeHeader, mimeToText, parseAddress, stripQuoted } from '../src/email/mime';
 import worker from '../src/index';
-import { callStructured } from '../src/openai';
+import { callStructured } from '../src/ai';
 import { confidentSubset, refinePlan } from '../src/organize';
 import { NudgeOutput } from '../../app/src/core/ai-contracts';
 import { nudgeSchema } from '../src/schemas';
@@ -192,18 +192,32 @@ describe('email routes', () => {
   });
 });
 
-describe('OpenAI 429 handling', () => {
-  const env = { SUPABASE_URL: 'https://sb.test', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'svc', OPENAI_API_KEY: 'sk' };
+describe('Claude error handling', () => {
+  const env = { SUPABASE_URL: 'https://sb.test', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'svc', ANTHROPIC_API_KEY: 'sk-ant-test' };
   const call = { operation: 'nudge', promptVersion: 'v1', system: 's', user: {}, jsonSchema: nudgeSchema, validator: NudgeOutput, maxOutputTokens: 50, userId: id(1) };
 
-  it('stops immediately with ai_quota when the account has no credit', async () => {
-    let openaiCalls = 0;
+  it('reports ai_quota once, without retrying, when the account has no credit', async () => {
+    let claudeCalls = 0;
     vi.stubGlobal('fetch', vi.fn(async (u: string) => {
-      if (!u.includes('api.openai.com')) return Response.json({});
-      openaiCalls++;
-      return Response.json({ error: { code: 'insufficient_quota', message: 'You exceeded your current quota' } }, { status: 429 });
+      if (!String(u).includes('api.anthropic.com')) return Response.json({});
+      claudeCalls++;
+      return Response.json({ type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }, { status: 400 });
     }));
     await expect(callStructured(env, call)).rejects.toMatchObject({ code: 'ai_quota', status: 503 });
-    expect(openaiCalls).toBe(1);
+    expect(claudeCalls).toBe(1);
+  });
+
+  it('sends a JSON schema format and the default refusal fallback', async () => {
+    let body: Record<string, unknown> = {};
+    let beta = '';
+    vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
+      if (!String(u).includes('api.anthropic.com')) return Response.json({});
+      body = JSON.parse(String(init?.body));
+      beta = new Headers(init?.headers).get('anthropic-beta') ?? '';
+      return Response.json({ id: 'm', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: '{"message":"Want help finding a smaller step?"}' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 10 } });
+    }));
+    await callStructured(env, call);
+    expect(body).toMatchObject({ model: 'claude-opus-5-5', fallbacks: 'default', output_config: { format: { type: 'json_schema' } } });
+    expect(beta).toContain('server-side-fallback-2026-07-01');
   });
 });

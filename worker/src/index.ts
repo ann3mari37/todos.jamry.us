@@ -4,7 +4,7 @@ import { runScheduled } from './cron';
 import { availableProviders, connectImap, disconnect, finishOAuth, startOAuth } from './email/accounts';
 import * as email from './email/service';
 import type { Env } from './env';
-import { enforceLimits, transcribe } from './openai';
+import { enforceLimits, transcribe } from './ai';
 import * as ops from './ops';
 import * as organize from './organize';
 import { authenticate, HttpError } from './supabase';
@@ -74,17 +74,14 @@ const DATA_ROUTES: Record<string, Handler> = {
     const ctx = { env, ...c };
     const result = (await ops.commitCapture(ctx, { ...parse(CommitCaptureInput, body), source })) as { items?: { kind: string; id: string }[] };
     // File new loose tasks into projects/areas when auto-organize is on. Never blocks or fails the commit.
-    // AI files them when available; keyword rules otherwise.
+    // Rules file new items into projects and life areas (AI is reserved for summaries and expanding projects).
     const organized = result.items?.length
-      ? await organize.autoOrganize(ctx, result.items, source === 'email' ? 'email' : 'capture', await ops.aiAllowed(ctx))
+      ? await organize.autoOrganize(ctx, result.items, source === 'email' ? 'email' : 'capture', false)
       : null;
     return { ...result, organized };
   },
-  // Works without an AI provider: falls back to keyword rules (plan.source tells the app which ran).
-  '/api/ai/organize': async (req, env, c) => {
-    const ctx = { env, ...c };
-    return organize.organizePreview(ctx, parse(organize.OrganizePreviewInput, await readJson(req)), await ops.aiAllowed(ctx));
-  },
+  // Organizing is rule-based by design; plan.source is 'rules'.
+  '/api/ai/organize': async (req, env, c) => organize.organizePreview({ env, ...c }, parse(organize.OrganizePreviewInput, await readJson(req)), false),
   '/api/organize/apply': async (req, env, c) => organize.organizeApply({ env, ...c }, parse(ApplyOrganizeInput, await readJson(req))),
   '/api/organize/undo': async (req, env, c) => organize.organizeUndo({ env, ...c }, parse(organize.UndoOrganizeInput, await readJson(req))),
 
@@ -111,16 +108,9 @@ const DATA_ROUTES: Record<string, Handler> = {
   '/api/email/sync': async (req, env, c) => {
     const input = parse(email.SyncInput, await readJson(req));
     const accounts = await email.syncAccounts(env, c.db, c.userId, input);
-    let triaged = 0;
-    let source: 'ai' | 'rules' = 'rules';
-    if (await ops.aiAllowed({ env, ...c })) {
-      try {
-        triaged = await email.triage(env, c.db, c.userId);
-        source = 'ai';
-      } catch { /* falls through to rules; AI retries these next sync */ }
-    }
-    if (source === 'rules') triaged = await email.triageWithRules(c.db, c.userId);
-    return { accounts, triaged, source };
+    // Sorting mail is rule-based; Claude writes the digest and thread summaries.
+    const triaged = await email.triageWithRules(c.db, c.userId);
+    return { accounts, triaged };
   },
   // Works without AI: the digest falls back to counts and the most important messages.
   '/api/ai/email-digest': async (req, env, c) => {
@@ -136,7 +126,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const { pathname } = new URL(req.url);
     try {
-      if (pathname === '/api/health') return json({ ok: true, ai: !!env.OPENAI_API_KEY, email: availableProviders(env), env: env.ENVIRONMENT ?? 'production' }, 200, headers);
+      if (pathname === '/api/health') return json({ ok: true, ai: !!env.ANTHROPIC_API_KEY, voice: !!env.OPENAI_API_KEY, email: availableProviders(env), env: env.ENVIRONMENT ?? 'production' }, 200, headers);
       // OAuth providers redirect the browser here (GET, no bearer token); the signed state identifies the user.
       if (pathname === '/api/email/oauth/callback' && req.method === 'GET') return finishOAuth(env, new URL(req.url));
       const handler = AI_ROUTES[pathname] ?? DATA_ROUTES[pathname];
@@ -144,7 +134,7 @@ export default {
       if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
       const auth = await authenticate(req, env);
       if (AI_ROUTES[pathname]) {
-        if (!env.OPENAI_API_KEY) throw new HttpError(503, 'ai_not_configured');
+        if (pathname !== '/api/ai/transcribe' && !env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ai_not_configured');
         await enforceLimits(env, auth.userId);
       }
       return json(await handler(req, env, { db: auth.db, userId: auth.userId }), 200, headers);

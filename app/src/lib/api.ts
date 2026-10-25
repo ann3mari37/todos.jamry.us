@@ -63,7 +63,9 @@ export function friendlyAiError(e: unknown): string {
     case 'ai_not_configured':
       return "AI isn't set up yet. Organized without AI — please check the items.";
     case 'ai_quota':
-      return "AI is paused: the OpenAI account is out of credit. Organized without AI — please check the items.";
+      return 'AI is paused: the Claude account is out of credit. Everything else still works.';
+    case 'voice_not_configured':
+      return "Voice input isn't set up on the server. Use your keyboard's microphone instead.";
     case 'email_not_configured':
     case 'gmail_not_configured':
     case 'outlook_not_configured':

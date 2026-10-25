@@ -73,8 +73,8 @@ export default function Settings() {
       {section === 'ai' && p && (
         <>
           <Card>
-            <Toggle label="Use AI" hint="Organizes captures, suggests next steps, writes reflections." value={p.ai_enabled} onChange={(v) => store.updateProfile({ ai_enabled: v })} />
-            <Muted>When on, the text of what you capture and relevant project details are sent to the OpenAI API for processing. Keys and data access stay on the server. With AI off, everything still works — you organize things yourself.</Muted>
+            <Toggle label="Use AI" hint="Summaries (inbox digest, threads, weekly reflection) and expanding projects into next steps. Organizing always uses rules." value={p.ai_enabled} onChange={(v) => store.updateProfile({ ai_enabled: v })} />
+            <Muted>When on, the text of what you capture and relevant project details are sent to Anthropic's Claude API when you use an AI feature. Keys and data access stay on the server. With AI off, everything still works — you organize things yourself.</Muted>
           </Card>
           <Label>Preferred step size</Label>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -154,8 +154,8 @@ export default function Settings() {
       {section === 'privacy' && (
         <>
           <Card>
-            <Body>Your data lives in your own Supabase database, protected so only your account can read it. AI requests go through your own Cloudflare Worker; the OpenAI key never reaches this device.</Body>
-            <Muted style={{ marginTop: 8 }}>With AI on, captured text and relevant project details are sent to the OpenAI API. Operational logs record only counts, timing and cost — never your content.</Muted>
+            <Body>Your data lives in your own Supabase database, protected so only your account can read it. AI requests go through your own Cloudflare Worker; the Claude key never reaches this device.</Body>
+            <Muted style={{ marginTop: 8 }}>Captures are organized on this device by rules. With AI on, project details and email summaries are sent to Claude only for summaries and next-step suggestions. Operational logs record only counts, timing and cost — never your content.</Muted>
           </Card>
           <Button title="Export all my data" icon="download" variant="soft" onPress={exportData} />
           <Button title="Delete all my data" variant="ghost" style={{ marginTop: 8 }} onPress={() => confirm('Delete everything?', 'All goals, actions, accomplishments and history will be permanently deleted. Consider exporting first.', async () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
-import { callStructured } from '../src/openai';
+import { callStructured } from '../src/ai';
 import { NudgeOutput } from '../../app/src/core/ai-contracts';
 import { nudgeSchema } from '../src/schemas';
 
@@ -8,7 +8,7 @@ const env = {
   SUPABASE_URL: 'https://sb.test',
   SUPABASE_ANON_KEY: 'anon',
   SUPABASE_SERVICE_ROLE_KEY: 'service',
-  OPENAI_API_KEY: 'sk-test',
+  ANTHROPIC_API_KEY: 'sk-ant-test',
   ALLOWED_ORIGINS: 'https://todos.jamry.us',
 };
 
@@ -27,8 +27,10 @@ function mockFetch(...routes: Route[]) {
   return calls;
 }
 const jsonRes = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
-const openai = (content: string): Route => (url) =>
-  url.includes('api.openai.com') ? jsonRes({ choices: [{ message: { content } }], usage: { prompt_tokens: 100, completion_tokens: 50 } }) : undefined;
+const claude = (text: string): Route => (url) =>
+  url.includes('api.anthropic.com')
+    ? jsonRes({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 100, output_tokens: 50 } })
+    : undefined;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -62,9 +64,9 @@ describe('worker routing & security', () => {
     expect(bad.status).toBe(400);
   });
 
-  it('reports ai_not_configured instead of failing when no OpenAI key is set', async () => {
+  it('reports ai_not_configured instead of failing when no Claude key is set', async () => {
     mockFetch((u) => (u.includes('/auth/v1/user') ? jsonRes({ id: '11111111-1111-4111-8111-111111111111' }) : undefined));
-    const res = await worker.fetch(req('/api/ai/interpret-capture', { body: '{"text":"hi"}', headers: { Authorization: 'Bearer t' } }), { ...env, OPENAI_API_KEY: '' });
+    const res = await worker.fetch(req('/api/ai/interpret-capture', { body: '{"text":"hi"}', headers: { Authorization: 'Bearer t' } }), { ...env, ANTHROPIC_API_KEY: '' });
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'ai_not_configured' });
   });
@@ -74,14 +76,14 @@ describe('structured AI calls', () => {
   const call = { operation: 'generate_accountability_nudge', promptVersion: 'v1', system: 's', user: {}, jsonSchema: nudgeSchema, validator: NudgeOutput, maxOutputTokens: 100, userId: 'u' };
 
   it('returns validated output', async () => {
-    mockFetch(openai(JSON.stringify({ message: 'Want help finding a smaller step?' })));
+    mockFetch(claude(JSON.stringify({ message: 'Want help finding a smaller step?' })));
     expect(await callStructured(env, call)).toEqual({ message: 'Want help finding a smaller step?' });
   });
 
   it('rejects output with unexpected fields (after one retry)', async () => {
-    const calls = mockFetch(openai(JSON.stringify({ message: 'Want help finding a smaller step?', extra: true })));
+    const calls = mockFetch(claude(JSON.stringify({ message: 'Want help finding a smaller step?', extra: true })));
     await expect(callStructured(env, call)).rejects.toMatchObject({ code: 'ai_unavailable' });
-    expect(calls.filter((c) => c.includes('openai')).length).toBe(2);
+    expect(calls.filter((c) => c.includes('api.anthropic.com')).length).toBe(2);
   });
 
   it('rejects oversized context before calling the model', async () => {

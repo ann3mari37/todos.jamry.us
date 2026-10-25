@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { ApplyOrganizeInput, OrganizeOutput, type OrganizeAssignment, type OrganizeProject } from '../../app/src/core/ai-contracts';
 import { guessLifeArea, matchProject } from '../../app/src/core/rules';
-import { callStructured } from './openai';
+import { callStructured } from './ai';
 import { keepId, must, norm, profile, type Ctx } from './ops';
 import { PROMPTS } from './prompts';
 import * as S from './schemas';

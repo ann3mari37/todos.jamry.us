@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { EmailDigestOutput, EmailThreadOutput, EmailTriageOutput } from '../../../app/src/core/ai-contracts';
 import { toISODate } from '../../../app/src/core/dates';
 import type { Env } from '../env';
-import { callStructured } from '../openai';
+import { callStructured } from '../ai';
 import { triageEmail } from '../../../app/src/core/rules';
 import { keepId } from '../ops';
 import { PROMPTS } from '../prompts';

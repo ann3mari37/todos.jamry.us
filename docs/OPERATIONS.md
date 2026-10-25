@@ -25,8 +25,9 @@
 |---|---|---|
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | var | |
 | `SUPABASE_SERVICE_ROLE_KEY` | **secret** | `wrangler secret put SUPABASE_SERVICE_ROLE_KEY` |
-| `OPENAI_API_KEY` | **secret** | `wrangler secret put OPENAI_API_KEY` |
-| `OPENAI_MODEL` | var | default `gpt-5-mini` |
+| `ANTHROPIC_API_KEY` | **secret** | Claude, for summaries and expanding projects: `wrangler secret put ANTHROPIC_API_KEY` (create the key at console.anthropic.com). Organizing never needs it. |
+| `AI_MODEL` | var | default `claude-opus-5-5` |
+| `OPENAI_API_KEY` | **secret**, optional | only for the Speak button's transcription on iPhone/Android |
 | `OPENAI_TRANSCRIBE_MODEL` | var | default `gpt-4o-mini-transcribe` |
 | `ALLOWED_ORIGINS` | var | `https://todos.jamry.us` |
 | `AI_HOURLY_LIMIT` | var | per user, default 60 |

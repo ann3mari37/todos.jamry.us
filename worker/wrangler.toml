@@ -12,8 +12,8 @@ crons = ["17 13 * * *"] # daily, 13:17 UTC
 
 [vars]
 ENVIRONMENT = "production"
-OPENAI_MODEL = "gpt-5-mini"
-OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
+AI_MODEL = "claude-opus-5-5"
+OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe" # optional voice input; needs OPENAI_API_KEY
 ALLOWED_ORIGINS = "https://todos.jamry.us"
 AI_HOURLY_LIMIT = "60"
 AI_DAILY_COST_CAP_USD = "1.00"
@@ -21,7 +21,7 @@ APP_URL = "https://todos.jamry.us"
 SUPABASE_URL = "https://noyenmjdzfglniennbdo.supabase.co"
 # SUPABASE_ANON_KEY is stored as a secret (wrangler secret put SUPABASE_ANON_KEY).
 # Email OAuth client IDs are public; set GOOGLE_CLIENT_ID / MS_CLIENT_ID here or in the dashboard.
-# Secrets (never commit):  wrangler secret put SUPABASE_SERVICE_ROLE_KEY / OPENAI_API_KEY /
+# Secrets (never commit):  wrangler secret put SUPABASE_SERVICE_ROLE_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY (voice, optional) /
 #   EMAIL_TOKEN_KEY / GOOGLE_CLIENT_SECRET / MS_CLIENT_SECRET
 
 [observability]
@@ -35,7 +35,7 @@ workers_dev = true
 crons = []
 [env.dev.vars]
 ENVIRONMENT = "dev"
-OPENAI_MODEL = "gpt-5-mini"
+AI_MODEL = "claude-opus-5-5"
 OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 ALLOWED_ORIGINS = "http://localhost:8081"
 AI_HOURLY_LIMIT = "60"

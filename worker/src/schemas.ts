@@ -1,10 +1,10 @@
-// JSON Schemas sent to OpenAI (strict mode: every property required, no extras).
+// JSON Schemas for Claude structured outputs (every property required, no extra properties).
 // They mirror the Zod contracts in app/src/core/ai-contracts.ts, which remain the source of truth for validation.
 
 type S = Record<string, unknown>;
 const str: S = { type: 'string' };
-const nstr: S = { type: ['string', 'null'] };
-const nint: S = { type: ['integer', 'null'] };
+const nstr: S = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+const nint: S = { anyOf: [{ type: 'integer' }, { type: 'null' }] };
 const bool: S = { type: 'boolean' };
 const arr = (items: S): S => ({ type: 'array', items });
 const obj = (properties: Record<string, S>): S => ({

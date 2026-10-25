@@ -2,8 +2,9 @@ export interface Env {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_ROLE_KEY: string; // secret — used for ai_operations logging, cron, and mailbox credentials
-  OPENAI_API_KEY: string; // secret
-  OPENAI_MODEL?: string;
+  ANTHROPIC_API_KEY?: string; // secret — Claude, for summaries and expanding projects
+  AI_MODEL?: string; // default claude-opus-5-5
+  OPENAI_API_KEY?: string; // secret, optional — only for voice transcription
   OPENAI_TRANSCRIBE_MODEL?: string;
   ALLOWED_ORIGINS?: string; // comma-separated
   AI_HOURLY_LIMIT?: string; // per-user AI operations per hour

@@ -8,12 +8,12 @@ import { startOfWeek, toISODate } from '../../app/src/core/dates';
 import type { Accomplishment, Action, FeedbackEntry, Goal } from '../../app/src/core/types';
 import type { Env } from './env';
 import { nudgeMessage, weeklyFacts } from './ops';
-import { callStructured } from './openai';
+import { callStructured } from './ai';
 import { PROMPTS } from './prompts';
 import { summarySchema } from './schemas';
 import { ProgressSummaryOutput } from '../../app/src/core/ai-contracts';
 import { serviceClient } from './supabase';
-import { buildDigest, syncAccounts, triage, triageWithRules } from './email/service';
+import { buildDigest, syncAccounts, triageWithRules } from './email/service';
 
 export async function runScheduled(env: Env, now = new Date()) {
   const db = serviceClient(env);
@@ -87,10 +87,6 @@ async function emailDigestFor(env: Env, userId: string, aiEnabled: boolean) {
   const { count } = await db.from('email_accounts').select('id', { count: 'exact', head: true }).eq('user_id', userId);
   if (!count) return;
   await syncAccounts(env, db, userId, { force: true });
-  let aiTriaged = false;
-  if (aiEnabled && env.OPENAI_API_KEY) {
-    try { await triage(env, db, userId, 30); aiTriaged = true; } catch { /* rules below */ }
-  }
-  if (!aiTriaged) await triageWithRules(db, userId);
-  await buildDigest(env, db, userId, { regenerate: true }, aiEnabled && !!env.OPENAI_API_KEY);
+  await triageWithRules(db, userId); // sorting is rule-based; Claude only writes the digest
+  await buildDigest(env, db, userId, { regenerate: true }, aiEnabled && !!env.ANTHROPIC_API_KEY);
 }

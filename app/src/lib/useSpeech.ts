@@ -13,7 +13,7 @@ type State = 'idle' | 'listening' | 'transcribing';
 /**
  * Voice dictation.
  * - Web: the browser's built-in speech recognition (live, free) when available, otherwise record + transcribe.
- * - iOS/Android: record audio, then transcribe through the Worker (OpenAI), so no key ever lives on the device.
+ * - iOS/Android: record audio, then transcribe through the Worker (OpenAI's speech-to-text; optional), so no key ever lives on the device.
  */
 export function useSpeech(onText: (text: string) => void) {
   const [state, setState] = useState<State>('idle');

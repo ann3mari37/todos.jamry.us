@@ -1,11 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, Switch, Text, TextInput, View } from 'react-native';
 import { Banner, Body, Button, Card, Chip, Field, H1, Icon, IconCircle, Muted, Screen, Sheet, type IconName } from '../../src/components/ui';
 import type { CaptureItem, CommitItem } from '../../src/core/ai-contracts';
 import { toISODate } from '../../src/core/dates';
-import { fallbackInterpret } from '../../src/core/fallback-capture';
-import { api, ApiError, friendlyAiError } from '../../src/lib/api';
+import { fallbackInterpret, guessLifeArea } from '../../src/core/fallback-capture';
 import { useStore, uuid } from '../../src/lib/store';
 import { useSpeech } from '../../src/lib/useSpeech';
 import { colors, fonts, radius, shadow } from '../../src/theme';
@@ -33,7 +32,6 @@ export default function Capture() {
   const [text, setText] = useState('');
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [captureId, setCaptureId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [questions, setQuestions] = useState<string[]>([]);
@@ -46,36 +44,20 @@ export default function Capture() {
   useEffect(reset, [params.mode, params.goal, reset]);
 
   const speech = useSpeech(useCallback((t: string) => { setSource('voice'); setText((prev) => (prev ? `${prev} ${t}` : t)); }, []));
-  const aiOn = store.profile?.ai_enabled !== false;
 
-  const interpret = async () => {
+  // Organizing is rule-based: instant, free, and works offline. You review everything before it's saved.
+  const interpret = () => {
     const raw = text.trim();
     if (!raw) return;
-    setBusy(true); setNotice(null); setQuestions([]);
-    try {
-      if (!aiOn) throw new ApiError(403, 'ai_disabled');
-      if (mode === 'did') {
-        const res = await api<{ items: { title: string; occurred_at: string | null; suggested_goal_id: string | null; advances_goal: boolean; matches_action_id: string | null; suggested_life_area_id: string | null; possible_duplicate_of: string | null }[] }>('/api/ai/classify-accomplishments', { text: raw });
-        setDrafts(res.items.map((i) => blank({
-          kind: 'accomplishment', title: i.title, occurred_at: i.occurred_at, suggested_goal_id: params.goal ?? i.suggested_goal_id,
-          suggested_life_area_id: i.suggested_life_area_id, possible_duplicate_of: i.possible_duplicate_of, matches_action_id: i.matches_action_id,
-          meaningful: !!params.goal || i.advances_goal,
-        })));
-      } else {
-        const res = await api<{ capture_id: string; items: CaptureItem[]; questions: string[] }>('/api/ai/interpret-capture', { text: raw, source: mode === 'goal' ? 'goal' : source, idempotency_key: uuid() });
-        setCaptureId(res.capture_id);
-        setQuestions(res.questions);
-        setDrafts(res.items.map((i) => blank({ ...i, kind: mode === 'goal' && res.items.length === 1 ? 'goal' : i.kind })));
-      }
-    } catch (e) {
-      // AI unavailable → deterministic split. Nothing the user typed is lost.
-      if (e instanceof ApiError && e.body?.capture_id) setCaptureId(String(e.body.capture_id));
-      setNotice(friendlyAiError(e));
-      const local = mode === 'goal' ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw })] } : fallbackInterpret(raw, store.lifeAreas, store.goals.filter((g) => ['active', 'waiting', 'blocked'].includes(g.status)));
-      setDrafts(local.items.map((i) => blank({ ...i, kind: mode === 'did' ? 'accomplishment' : i.kind, suggested_goal_id: params.goal ?? null, meaningful: !!params.goal })));
-    } finally {
-      setBusy(false);
-    }
+    setNotice(null); setQuestions([]); setCaptureId(null);
+    const goals = store.goals.filter((g) => ['active', 'waiting', 'blocked'].includes(g.status));
+    const local = mode === 'goal'
+      ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw, suggested_life_area_id: guessLifeArea(raw, store.lifeAreas) })] }
+      : fallbackInterpret(raw, store.lifeAreas, goals);
+    setDrafts(local.items.map((i) => {
+      const goalId = params.goal ?? i.suggested_goal_id;
+      return blank({ ...i, kind: mode === 'did' ? 'accomplishment' : i.kind, suggested_goal_id: goalId, meaningful: !!goalId && (mode === 'did' || !!params.goal) });
+    }));
   };
 
   const save = async () => {
@@ -152,20 +134,14 @@ export default function Capture() {
             />
             <Pressable
               onPress={interpret}
-              disabled={!text.trim() || busy}
+              disabled={!text.trim()}
               accessibilityRole="button"
               accessibilityLabel="Organize this"
               style={{ position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: text.trim() ? colors.pink : colors.pinkSoft, alignItems: 'center', justifyContent: 'center' }}
             >
-              {busy ? <ActivityIndicator color={colors.white} /> : <Icon name="arrow-up" size={20} color={colors.white} />}
+              <Icon name="arrow-up" size={20} color={colors.white} />
             </Pressable>
           </View>
-          {busy && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 }} accessibilityLiveRegion="polite">
-              <Icon name="star" size={14} color={colors.pink} />
-              <Text style={{ fontFamily: fonts.medium, color: colors.pinkDeep }}>{aiOn ? 'AI is organizing this for you…' : 'Organizing…'}</Text>
-            </View>
-          )}
           {notice && <Banner tone="soft" text={notice} />}
           <Button variant="ghost" title={mode === 'did' ? 'Add one by hand' : 'Skip AI and add by hand'} onPress={addManual} />
         </>
