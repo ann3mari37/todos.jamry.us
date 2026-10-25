@@ -249,6 +249,9 @@ function useStoreValue() {
       setData(next);
       save(next);
       setOnline(true);
+      // Keep the profile's time zone current, so the Worker and AI connector know what "today" means for this person.
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz && next.profile && next.profile.timezone !== tz) supabase.from('profiles').update({ timezone: tz }).eq('id', session.user.id).then(() => {});
     } catch (e) {
       if (isNetworkError(e)) setOnline(false);
       else console.warn('refresh failed', (e as Error).message);
@@ -400,6 +403,11 @@ function useStoreValue() {
     if (DEMO) return;
     await check(supabase.from('daily_checkins').upsert({ day, ...p, updated_at: new Date().toISOString() }, { onConflict: 'user_id,day' }));
   }, [patch]);
+  /**
+   * Pins a task as tomorrow's first thing (null unpins). It's stored on today's check-in, and tomorrow's Today and the AI
+   * connector keep it on top until it's done, skipped or unpinned.
+   */
+  const pinForTomorrow = useCallback((actionId: string | null) => saveCheckin(toISODate(new Date()), { tomorrow_first_action_id: actionId }), [saveCheckin]);
   const chatConnections = useCallback(async (): Promise<ChatConnection[]> => {
     if (DEMO) return demo.chatConnections;
     const { data: grants, error } = await supabase.auth.oauth.listGrants();
@@ -421,10 +429,20 @@ function useStoreValue() {
     await refresh();
   }, [refresh]);
 
-  const createAction = useCallback(async (a: Partial<Action> & { title: string }) => {
+  /** Adds one task and returns its id. */
+  const createAction = useCallback(async (a: Partial<Action> & { title: string }): Promise<string> => {
     const order = data.actions.filter((x) => x.goal_id && x.goal_id === a.goal_id).length;
-    await check(supabase.from('actions').insert({ status: 'ready', origin: 'user', sort_order: order, ...a }));
+    if (DEMO) {
+      const row = { id: `x-${uuid()}`, goal_id: null, life_area_id: null, notes: null, completion_criteria: null, estimated_minutes: null, status: 'ready', origin: 'user',
+        requires_clarification: false, user_edited: false, sort_order: order, times_recommended: 0, times_skipped: 0, completed_at: null, created_at: new Date().toISOString(),
+        due_date: null, deadline_type: 'none', ...a } as Action;
+      demo.current = { ...demo.current, actions: [...demo.current.actions, row] };
+      setData({ ...demo.current });
+      return row.id;
+    }
+    const row = (await check(supabase.from('actions').insert({ status: 'ready', origin: 'user', sort_order: order, ...a }).select('id').single())) as { id: string };
     await refresh();
+    return row.id;
   }, [data.actions, refresh]);
 
   /** Adds several steps to a project at once (template or AI suggestions show as 'suggested' with Keep / ✕). */
@@ -533,13 +551,13 @@ function useStoreValue() {
     refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture, updateAccomplishment, deleteAccomplishment,
     createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge, upsertLifeArea, deleteLifeArea,
     updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
-    dismissHandoff, chatConnections, revokeChat, saveCheckin,
+    dismissHandoff, chatConnections, revokeChat, saveCheckin, pinForTomorrow,
     organizePreview, organizeApply, organizeUndo,
     emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount, emailSync, emailRefreshDigest, emailThread, emailModify,
   }), [session, authReady, loading, online, pending, data, lastOrganized, refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
     updateAccomplishment, deleteAccomplishment, createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge,
     upsertLifeArea, deleteLifeArea, updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
-    dismissHandoff, chatConnections, revokeChat, saveCheckin,
+    dismissHandoff, chatConnections, revokeChat, saveCheckin, pinForTomorrow,
     organizePreview, organizeApply, organizeUndo, emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount,
     emailSync, emailRefreshDigest, emailThread, emailModify]);
 }

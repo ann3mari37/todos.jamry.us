@@ -146,6 +146,7 @@ const INSTRUCTIONS = [
   'Call get_overview before suggesting things so you build on what already exists instead of duplicating it.',
   'When the plan feels right, call send_plan once with everything. It waits for their review in the app, so it is safe to be generous.',
   'Use add_task / create_project only for a single thing they clearly asked to add now.',
+  'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
 
@@ -180,7 +181,9 @@ async function overview(ctx: Ctx) {
   const open = actions.filter((a) => OPEN.includes(a.status));
   const due = crunch(actions, goals);
   const stale = staleTasks(actions, goals);
+  const pinned = await pins(ctx, actions);
   return {
+    ...pinned,
     life_areas: areas.map((a) => a.name),
     projects: goals.map((g) => {
       const steps = actions.filter((a) => a.goal_id === g.id);
@@ -209,18 +212,53 @@ async function overview(ctx: Ctx) {
   };
 }
 
+/** The person's local calendar date, offset by `days`, using the time zone the app saved on their profile. */
+function localDate(tz: string, days = 0): string {
+  const d = new Date(Date.now() + days * 86_400_000);
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
+  catch { return d.toISOString().slice(0, 10); }
+}
+
+/**
+ * The person's pinned "first thing": chosen under End my day (or "Put first thing tomorrow") and stored on that day's
+ * check-in, so yesterday's pin is today's first thing. Only open tasks count.
+ */
+async function pins(ctx: Ctx, actions: Action[]) {
+  const { data: prof } = await ctx.db.from('profiles').select('timezone').maybeSingle();
+  const tz = (prof as { timezone?: string } | null)?.timezone || 'UTC';
+  const [yesterday, today] = [localDate(tz, -1), localDate(tz, 0)];
+  const { data } = await ctx.db.from('daily_checkins').select('day,tomorrow_first_action_id').in('day', [yesterday, today]);
+  const rows = (data ?? []) as { day: string; tomorrow_first_action_id: string | null }[];
+  const open = (id: string | null | undefined) => {
+    const a = id ? actions.find((x) => x.id === id && ['ready', 'in_progress', 'waiting', 'blocked'].includes(x.status)) : null;
+    return a ? { task_id: a.id, title: a.title } : null;
+  };
+  return {
+    first_thing_today: open(rows.find((r) => r.day === yesterday)?.tomorrow_first_action_id),
+    first_thing_tomorrow: open(rows.find((r) => r.day === today)?.tomorrow_first_action_id),
+  };
+}
+
 async function today(ctx: Ctx) {
   const { areas, goals, actions } = await load(ctx);
   const [deps, feedback] = await Promise.all([
     must(ctx.db.from('action_dependencies').select('action_id,depends_on_id')),
     must(ctx.db.from('recommendation_feedback').select('action_id,goal_id,response,created_at').gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString())),
   ]);
-  const recs = recommend({ goals, actions, dependencies: deps as never, feedback: feedback as never, lifeAreas: areas });
+  const pinned = await pins(ctx, actions);
+  const recs = recommend({ goals, actions, dependencies: deps as never, feedback: feedback as never, lifeAreas: areas })
+    .filter((r) => r.action?.id !== pinned.first_thing_today?.task_id);
+  const first = pinned.first_thing_today ? actions.find((a) => a.id === pinned.first_thing_today!.task_id)! : null;
   return {
-    suggestions: recs.map((r) => ({
+    first_thing_today: pinned.first_thing_today,
+    first_thing_tomorrow: pinned.first_thing_tomorrow,
+    suggestions: [
+      ...(first ? [{ category: 'Their first thing (pinned by them)', task_id: first.id, task: first.title, project: goals.find((g) => g.id === first.goal_id)?.title ?? null, minutes: first.estimated_minutes, reason: 'They chose this to start the day with. Keep it first.' }] : []),
+      ...recs.map((r) => ({
       category: KIND_LABEL[r.kind], task_id: r.action?.id ?? null, task: r.action?.title ?? null, project: r.goal?.title ?? null,
       minutes: r.action?.estimated_minutes ?? null, reason: r.reason,
-    })),
+      })),
+    ],
   };
 }
 

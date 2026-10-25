@@ -11,6 +11,8 @@ export interface Pick {
   action_id: string | null;
   goal_id: string | null;
   reason: string;
+  /** The person's own "first thing", chosen the night before: stays on top until done, skipped or unpinned. */
+  pinned?: boolean;
 }
 interface Plan {
   date: string;
@@ -91,7 +93,7 @@ export function usePlan() {
     let picks = recs.map(toPick);
     if (pinned) {
       const existing = picks.find((p) => p.action_id === pinned.id);
-      picks = [{ ...(existing ?? { kind: 'next_up' as const, action_id: pinned.id, goal_id: pinned.goal_id }), reason: 'You picked this last night to start the day with.' },
+      picks = [{ ...(existing ?? { kind: 'next_up' as const, action_id: pinned.id, goal_id: pinned.goal_id }), reason: 'You picked this to start the day with.', pinned: true },
         ...picks.filter((p) => p.action_id !== pinned.id)];
     }
     return picks;

@@ -4,10 +4,12 @@ import React, { useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { daysUntil, friendlyDate, toISODate } from '../core/dates';
 import { looksLikeProject, suggestWhy } from '../core/rules';
+import { minutesOf } from '../core/workload';
 import type { Action, DeadlineType } from '../core/types';
 import { useStore } from '../lib/store';
+import { EditTask } from './EditTask';
 import { colors, fonts } from '../theme';
-import { Body, Chip, Muted, Sheet, SheetOption } from './ui';
+import { Body, Chip, Icon, Muted, Sheet, SheetOption } from './ui';
 
 const OPEN: Action['status'][] = ['ready', 'in_progress', 'waiting', 'blocked'];
 
@@ -42,12 +44,23 @@ const DATE_CHOICES = (): { label: string; date: string }[] => {
   ];
 };
 
-/** A checklist of tasks: tap the circle to finish, tap the row for options. */
-export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?: number; emptyText?: string }) {
+/** "Added Oct 25 · by you" / "Added today · auto": when a task was created (never changes) and who added it. */
+export function addedLabel(a: Pick<Action, 'created_at' | 'origin'>): string {
+  const day = friendlyDate(toISODate(new Date(a.created_at)));
+  return `Added ${day} · ${a.origin === 'ai' ? 'auto' : 'by you'}`;
+}
+
+/**
+ * A checklist of tasks: tap the circle to finish, tap the row for options.
+ * `showAdded` adds when each task was added and by whom; `hideProject` leaves out the project name (inside a project).
+ */
+export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { tasks: Action[]; limit?: number; emptyText?: string; showAdded?: boolean; hideProject?: boolean }) {
   const store = useStore();
   const [open, setOpen] = useState<Action | null>(null);
   const [panel, setPanel] = useState<'menu' | 'area' | 'due'>('menu');
   const [all, setAll] = useState(false);
+  const [editing, setEditing] = useState<Action | null>(null);
+  const pinnedId = store.checkins.find((c) => c.day === toISODate(new Date()))?.tomorrow_first_action_id ?? null;
   const shown = limit && !all ? tasks.slice(0, limit) : tasks;
   const close = () => { setOpen(null); setPanel('menu'); };
 
@@ -87,7 +100,10 @@ export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?:
         const goal = a.goal_id ? store.goals.find((g) => g.id === a.goal_id) : null;
         const area = store.lifeAreas.find((x) => x.id === (a.life_area_id ?? goal?.life_area_id));
         const due = dueLabel(a);
-        const meta = [goal?.title, !goal && area?.name, a.estimated_minutes ? `${a.estimated_minutes} min` : null, a.status === 'waiting' ? 'Waiting' : a.status === 'blocked' ? 'Blocked' : null]
+        const snoozed = a.snoozed_until && daysUntil(a.snoozed_until) > 0 ? `Snoozed until ${friendlyDate(a.snoozed_until)}` : null;
+        const meta = [hideProject ? null : goal?.title, !goal && !hideProject && area?.name,
+          // Estimated time: the task's own, or a guess from its wording marked with ~.
+          a.estimated_minutes ? `${a.estimated_minutes} min` : `~${minutesOf(a)} min`, a.status === 'waiting' ? 'Waiting' : a.status === 'blocked' ? 'Blocked' : null, snoozed]
           .filter(Boolean).join(' · ');
         return (
           <View key={a.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, minHeight: 48 }}>
@@ -101,6 +117,12 @@ export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?:
                   {meta}
                 </Muted>
               ) : null}
+              {showAdded && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                  <Icon name={a.origin === 'ai' ? 'cpu' : 'user'} size={11} color={colors.textFaint} />
+                  <Muted style={{ fontSize: 12, color: colors.textFaint }}>{addedLabel(a)}</Muted>
+                </View>
+              )}
             </Pressable>
             {area && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: area.color }} />}
           </View>
@@ -117,6 +139,8 @@ export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?:
           <>
             {why && <Muted style={{ marginBottom: 6 }}>Why it matters: {why}</Muted>}
             <SheetOption icon="check-circle" label="Mark done" onPress={() => complete(live)} />
+            <SheetOption icon="edit-2" label="Edit task" onPress={() => { const a = live; close(); setEditing(a); }} />
+            <SheetOption icon="sunrise" label={pinnedId === live.id ? 'Unpin from tomorrow' : 'Put first thing tomorrow'} onPress={() => { store.pinForTomorrow(pinnedId === live.id ? null : live.id); close(); }} />
             {!live.goal_id && <SheetOption icon="folder-plus" label={projectLike ? 'Turn into a project (it has several steps)' : 'Make this a project'} onPress={() => makeProject(live)} />}
             <SheetOption icon="calendar" label={live.due_date ? `Due date: ${friendlyDate(live.due_date)}` : 'Set a due date'} onPress={() => setPanel('due')} />
             {!live.goal_id && <SheetOption icon="grid" label={`Life area: ${store.lifeAreas.find((x) => x.id === live.life_area_id)?.name ?? 'none'}`} onPress={() => setPanel('area')} />}
@@ -157,6 +181,7 @@ export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?:
           </>
         )}
       </Sheet>
+      <EditTask action={editing} onClose={() => setEditing(null)} />
     </View>
   );
 }

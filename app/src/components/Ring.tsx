@@ -18,7 +18,9 @@ export function Ring({ value, label, size, from, to, emphasis }: Props) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const filled = value > 0;
-  const id = `g-${label.replace(/\W/g, '')}`;
+  // Unique per ring: two rings sharing a gradient id (another screen still mounted, or the label changing from
+  // "project moved" to "projects moved") make the browser paint with a hidden gradient, so the fill only showed after a reload.
+  const id = `ring${React.useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <View
       style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}

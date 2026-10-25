@@ -7,7 +7,7 @@ import { colors, fonts } from '../../src/theme';
 const TABS: { name: string; title: string; icon: React.ComponentProps<typeof Feather>['name'] }[] = [
   { name: 'today', title: 'Today', icon: 'home' },
   { name: 'capture', title: 'Capture', icon: 'plus-square' },
-  { name: 'projects', title: 'Projects', icon: 'folder' },
+  { name: 'projects', title: 'To-dos', icon: 'check-square' },
   { name: 'progress', title: 'Progress', icon: 'bar-chart-2' },
   { name: 'more', title: 'More', icon: 'more-horizontal' },
 ];

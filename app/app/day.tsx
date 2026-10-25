@@ -195,7 +195,10 @@ function EndDay() {
   const [extra, setExtra] = useState(0);
   const [leftIds, setLeftIds] = useState<string[] | null>(null);
   const [decided, setDecided] = useState<Record<string, string>>({});
-  const [first, setFirst] = useState<string | null>(null);
+  // Starts with anything already pinned today ("Put first thing tomorrow"), so wrapping up never drops it.
+  const [first, setFirst] = useState<string | null>(() => store.checkins.find((c) => c.day === toISODate(new Date()))?.tomorrow_first_action_id ?? null);
+  const [newFirst, setNewFirst] = useState('');
+  const [adding, setAdding] = useState(false);
   const close = () => router.navigate('/today');
 
   const dayStart = startOfDay().getTime();
@@ -224,6 +227,22 @@ function EndDay() {
     if (choice === 'tomorrow') await store.updateAction(a.id, { due_date: inDays(1), deadline_type: a.deadline_type === 'hard' ? 'hard' : 'target' });
     if (choice === 'later' && a.due_date && daysUntil(a.due_date) <= 0 && a.deadline_type !== 'hard') await store.updateAction(a.id, { due_date: null, deadline_type: 'none' });
     if (choice === 'let_go') await store.updateAction(a.id, { status: 'dismissed' });
+  };
+  /** Types a brand-new task to start tomorrow with; the rules fill in its time, area and date like Capture does. */
+  const addFirst = async () => {
+    const text = newFirst.trim();
+    if (!text) return;
+    setAdding(true);
+    try {
+      const [item] = fallbackInterpret(text, store.lifeAreas, store.goals.filter((g) => g.status === 'active')).items;
+      const id = await store.createAction({
+        title: item?.title || text, estimated_minutes: item?.estimated_minutes ?? null, goal_id: item?.suggested_goal_id ?? null,
+        life_area_id: item?.suggested_goal_id ? null : item?.suggested_life_area_id ?? null,
+        due_date: item?.deadline ?? null, deadline_type: item?.deadline ? (item.deadline_type === 'hard' ? 'hard' : 'target') : 'none',
+      });
+      setFirst(id);
+      setNewFirst('');
+    } finally { setAdding(false); }
   };
   const finish = async () => {
     await store.saveCheckin(today, { ended_at: new Date().toISOString(), tomorrow_first_action_id: first }).catch(() => {});
@@ -282,6 +301,15 @@ function EndDay() {
             <Option key={a.id} selected={first === a.id} label={a.title} sub={`${a.due_date ? `Due ${friendlyDate(a.due_date)} · ` : ''}${minutesOf(a)} min`} onPress={() => setFirst(first === a.id ? null : a.id)} />
           ))}
           {options.length === 0 && <Muted>Nothing open right now. Enjoy the quiet.</Muted>}
+          {first && !options.some((o) => o.id === first) && <Option selected label={store.actions.find((a) => a.id === first)?.title ?? 'Your new task'} sub="Added just now" onPress={() => setFirst(null)} />}
+          <Body style={{ fontFamily: fonts.medium, marginTop: 10, marginBottom: 6 }}>Or something new</Body>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            <View style={[{ flex: 1, backgroundColor: colors.card, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 10 }]}>
+              <TextInput value={newFirst} onChangeText={setNewFirst} placeholder="Call the bank first thing…" placeholderTextColor={colors.textFaint} accessibilityLabel="A new first thing for tomorrow"
+                style={{ fontFamily: fonts.body, fontSize: 15, color: colors.text }} onSubmitEditing={() => addFirst()} returnKeyType="done" />
+            </View>
+            <Button title="Add" variant="soft" onPress={() => addFirst()} loading={adding} disabled={!newFirst.trim()} style={{ minHeight: 44, paddingHorizontal: 18 }} />
+          </View>
           <Button title="Wrap up the day" onPress={finish} style={{ marginTop: 8 }} />
           <Button title="Back" variant="ghost" onPress={() => setStep(1)} />
         </>

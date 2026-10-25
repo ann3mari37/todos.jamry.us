@@ -6,6 +6,7 @@ import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { DigestCard } from '../../src/components/EmailBits';
 import { Flower } from '../../src/components/Flower';
 import { FlowerArt } from '../../src/components/FlowerArt';
+import { EditTask } from '../../src/components/EditTask';
 import { OrganizeSheet } from '../../src/components/OrganizeSheet';
 import { TaskList, useOpenTasks } from '../../src/components/TaskList';
 import { Ring } from '../../src/components/Ring';
@@ -13,7 +14,7 @@ import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Lab
 import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay, toISODate } from '../../src/core/dates';
 import { KIND_LABEL, readyActions, remainingSteps } from '../../src/core/recommend';
 import { crunch, describeMinutes, minutesOf, staleTasks, type Crunch } from '../../src/core/workload';
-import type { RecommendationKind } from '../../src/core/types';
+import type { Action, RecommendationKind } from '../../src/core/types';
 import { useStore } from '../../src/lib/store';
 import { usePlan, type Pick } from '../../src/lib/usePlan';
 import { colors, fonts, KIND_STYLE, radius } from '../../src/theme';
@@ -45,6 +46,7 @@ export default function Today() {
   };
   const [organizing, setOrganizing] = useState(false);
   const [ringInfo, setRingInfo] = useState(false);
+  const [editing, setEditing] = useState<Action | null>(null);
 
   // ── Start my day / End my day. Never automatic: the person opens them when their day starts and ends. The only
   // prompt is a small card on a new date that hasn't been started yet, which "Not now" hides for the rest of the day.
@@ -266,7 +268,7 @@ export default function Today() {
                 <View style={{ flexDirection: 'row', gap: 12 }}>
                   <IconCircle name={style.icon} color={style.color} soft={style.soft} size={44} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: style.color === colors.amber ? '#D99A2B' : style.color }}>{KIND_LABEL[pick.kind]}</Text>
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: style.color === colors.amber ? '#D99A2B' : style.color }}>{pick.pinned ? 'Your first thing' : KIND_LABEL[pick.kind]}</Text>
                     <Body style={{ fontFamily: fonts.medium, fontSize: 17, marginTop: 2 }}>{action?.title ?? goal?.title}</Body>
                     {action && goal && pick.kind !== 'time_sensitive' && pick.kind !== 'quietly_waiting' && <Muted style={{ marginTop: 2 }} numberOfLines={1}>{goal.title}</Muted>}
                     <Muted style={{ marginTop: 4 }} numberOfLines={2}>{sub}</Muted>
@@ -322,6 +324,7 @@ export default function Today() {
       {tab === 'week' && <WeekTab />}
       {tab === 'areas' && <AreasTab />}
 
+      <EditTask action={editing} onClose={() => setEditing(null)} />
       <CrunchSheet visible={crunchOpen} load={load} onClose={() => setCrunchOpen(false)} />
       <Sheet visible={ringInfo} onClose={() => setRingInfo(false)} title="Projects moved today">
         {advancedToday.size > 0
@@ -346,6 +349,8 @@ export default function Today() {
       <Sheet visible={!!selected} onClose={() => setSelected(null)} title={selected?.action?.title}>
         {selected?.goal && <Muted style={{ marginBottom: 6 }}>{selected.goal.title}</Muted>}
         {selected?.action && <SheetOption icon="check-circle" label="Mark done" onPress={() => complete(selected.action!.id)} />}
+        {selected?.action && <SheetOption icon="edit-2" label="Edit task" onPress={() => { const a = selected.action!; setSelected(null); setEditing(a); }} />}
+        {selected?.action && <SheetOption icon="sunrise" label={checkin?.tomorrow_first_action_id === selected.action.id ? 'Unpin from tomorrow' : 'Put first thing tomorrow'} onPress={() => { store.pinForTomorrow(checkin?.tomorrow_first_action_id === selected.action!.id ? null : selected.action!.id); setSelected(null); setNote(checkin?.tomorrow_first_action_id === selected.action!.id ? 'Unpinned.' : 'Pinned. It’ll be first on Today tomorrow.'); }} />}
         {selected?.goal && <SheetOption icon="folder" label="Open project" onPress={() => { const id = selected.goal!.id; setSelected(null); router.push({ pathname: '/project/[id]', params: { id } }); }} />}
         {selected && <SheetOption icon="refresh-cw" label="Show me something else" onPress={() => respond(selected.pick, 'show_other')} />}
         {selected && <SheetOption icon="clock" label="Not today" onPress={() => respond(selected.pick, 'deferred')} />}

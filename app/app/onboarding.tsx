@@ -292,7 +292,7 @@ function TourProject() {
     try {
       const [draft] = handoffToDrafts([{ kind: 'project', title: title.trim(), steps: plan!.steps.map((s) => ({ title: s.title, minutes: s.minutes })) }], store.lifeAreas, []);
       await store.commitCapture(title, 'goal', null, draftsToCommit([{ ...draft, client_id: uuid() }]));
-      setMade(`“${draft.title}” is ready in Projects with ${plan!.steps.length} first steps.`);
+      setMade(`“${draft.title}” is ready in To-dos with ${plan!.steps.length} first steps.`);
       setTitle('');
     } catch (e) {
       setMade(`Couldn’t create it: ${(e as Error).message}`);
