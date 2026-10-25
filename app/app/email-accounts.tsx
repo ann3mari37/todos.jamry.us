@@ -193,7 +193,10 @@ function ImapSheet({ preset, onClose, onDone }: { preset: (typeof IMAP_PRESETS)[
   };
 
   return (
-    <Sheet visible onClose={onClose} title={`Connect ${preset.label}`}>
+    <Sheet visible onClose={onClose} title={`Connect ${preset.label}`} footer={<>
+      <Button title="Connect" loading={busy} disabled={!email.includes('@') || !password || !host} onPress={save} />
+      <Button title="Back" variant="ghost" onPress={onClose} />
+    </>}>
       <Muted style={{ marginBottom: 12 }}>{preset.help}</Muted>
       <Field label="Email address" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
       <Field label="App password" value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoComplete="off" />
@@ -201,8 +204,6 @@ function ImapSheet({ preset, onClose, onDone }: { preset: (typeof IMAP_PRESETS)[
       {preset.key === 'custom' && <Field label="Username (if different from email)" value={username} onChangeText={setUsername} autoCapitalize="none" />}
       <Field label="Archive folder" value={archive} onChangeText={setArchive} autoCapitalize="none" />
       {error && <Banner tone="soft" text={error} />}
-      <Button title="Connect" loading={busy} disabled={!email.includes('@') || !password || !host} onPress={save} />
-      <Button title="Back" variant="ghost" onPress={onClose} />
     </Sheet>
   );
 }

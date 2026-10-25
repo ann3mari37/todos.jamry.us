@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type StyleProp,
   type TextInputProps,
   type TextStyle,
@@ -207,15 +208,18 @@ export function Field(props: TextInputProps & { label?: string }) {
 }
 
 /** Bottom sheet used for edits and choices (cross-platform replacement for Alert.prompt). */
-export function Sheet({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title?: string; children: React.ReactNode }) {
+export function Sheet({ visible, onClose, title, children, footer }: { visible: boolean; onClose: () => void; title?: string; children: React.ReactNode; footer?: React.ReactNode }) {
+  // A numeric max height: a percentage has no sized parent here, so on web the sheet grew past the screen and cut off its buttons.
+  const { height } = useWindowDimensions();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: 'rgba(43,39,48,0.28)' }} onPress={onClose} accessibilityLabel="Close" />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 34, maxHeight: '88%', width: '100%', maxWidth: 560, alignSelf: 'center' }}>
+      <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(43,39,48,0.28)' }} onPress={onClose} accessibilityLabel="Close" />
+        <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 34, maxHeight: Math.round(height * 0.88), width: '100%', maxWidth: 560, alignSelf: 'center' }}>
           <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 12 }} />
           {title && <H2 style={{ marginBottom: 12 }}>{title}</H2>}
-          <ScrollView keyboardShouldPersistTaps="handled">{children}</ScrollView>
+          <ScrollView style={{ flexGrow: 0, flexShrink: 1 }} keyboardShouldPersistTaps="handled">{children}</ScrollView>
+          {footer && <View style={{ paddingTop: 8 }}>{footer}</View>}
         </View>
       </KeyboardAvoidingView>
     </Modal>
