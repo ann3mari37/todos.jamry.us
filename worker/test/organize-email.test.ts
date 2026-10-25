@@ -5,7 +5,10 @@ import { GmailProvider } from '../src/email/gmail';
 import { fetchMap, parseItems, quote } from '../src/email/imap';
 import { decodeHeader, mimeToText, parseAddress, stripQuoted } from '../src/email/mime';
 import worker from '../src/index';
+import { callStructured } from '../src/openai';
 import { confidentSubset, refinePlan } from '../src/organize';
+import { NudgeOutput } from '../../app/src/core/ai-contracts';
+import { nudgeSchema } from '../src/schemas';
 
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -186,5 +189,21 @@ describe('email routes', () => {
     }), env);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe('imap_tls_required');
+  });
+});
+
+describe('OpenAI 429 handling', () => {
+  const env = { SUPABASE_URL: 'https://sb.test', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'svc', OPENAI_API_KEY: 'sk' };
+  const call = { operation: 'nudge', promptVersion: 'v1', system: 's', user: {}, jsonSchema: nudgeSchema, validator: NudgeOutput, maxOutputTokens: 50, userId: id(1) };
+
+  it('stops immediately with ai_quota when the account has no credit', async () => {
+    let openaiCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (!u.includes('api.openai.com')) return Response.json({});
+      openaiCalls++;
+      return Response.json({ error: { code: 'insufficient_quota', message: 'You exceeded your current quota' } }, { status: 429 });
+    }));
+    await expect(callStructured(env, call)).rejects.toMatchObject({ code: 'ai_quota', status: 503 });
+    expect(openaiCalls).toBe(1);
   });
 });

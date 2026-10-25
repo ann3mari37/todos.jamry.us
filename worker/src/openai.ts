@@ -82,9 +82,14 @@ export async function callStructured<T>(env: Env, call: StructuredCall<T>): Prom
       clearTimeout(timer);
       const latency = Date.now() - started;
       if (!res.ok) {
-        lastErr = `openai_${res.status}`;
+        // OpenAI uses 429 both for "slow down" and for "account has no credit"; only the first is worth retrying.
+        const errCode = res.status === 429 ? ((await res.json().catch(() => null)) as { error?: { code?: string } } | null)?.error?.code : undefined;
+        const noCredit = errCode === 'insufficient_quota';
+        lastErr = noCredit ? 'openai_insufficient_quota' : `openai_${res.status}`;
         await log(env, { user_id: call.userId, operation: call.operation, model, prompt_version: call.promptVersion, status: res.status === 429 ? 'rate_limited' : 'error', latency_ms: latency, error_code: lastErr });
-        if (res.status >= 500 || res.status === 429) continue;
+        if (noCredit) throw new HttpError(503, 'ai_quota', lastErr);
+        if (res.status === 429) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+        if (res.status >= 500) continue;
         break;
       }
       const json = (await res.json()) as {
@@ -112,6 +117,7 @@ export async function callStructured<T>(env: Env, call: StructuredCall<T>): Prom
       lastErr = 'invalid_output';
     } catch (e) {
       clearTimeout(timer);
+      if (e instanceof HttpError) throw e;
       lastErr = (e as Error).name === 'AbortError' ? 'timeout' : 'network';
       await log(env, { user_id: call.userId, operation: call.operation, model, prompt_version: call.promptVersion, status: lastErr === 'timeout' ? 'timeout' : 'error', error_code: lastErr });
     }

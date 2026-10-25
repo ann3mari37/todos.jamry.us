@@ -71,7 +71,7 @@ export default function Capture() {
       // AI unavailable → deterministic split. Nothing the user typed is lost.
       if (e instanceof ApiError && e.body?.capture_id) setCaptureId(String(e.body.capture_id));
       setNotice(friendlyAiError(e));
-      const local = mode === 'goal' ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw })] } : fallbackInterpret(raw);
+      const local = mode === 'goal' ? { items: [blank({ kind: 'goal', title: raw.slice(0, 200), source_excerpt: raw })] } : fallbackInterpret(raw, store.lifeAreas);
       setDrafts(local.items.map((i) => blank({ ...i, kind: mode === 'did' ? 'accomplishment' : i.kind, suggested_goal_id: params.goal ?? null, meaningful: !!params.goal })));
     } finally {
       setBusy(false);
@@ -213,6 +213,8 @@ function ReviewRow({ d, onEdit }: { d: Draft; onEdit: () => void }) {
   if (d.kind === 'goal' && d.next_actions.length) parts.push(`${d.next_actions.length} next step${d.next_actions.length === 1 ? '' : 's'}`);
   if (d.estimated_minutes && d.kind === 'action') parts.push(`${d.estimated_minutes} min`);
   if (goal) parts.push(d.kind === 'accomplishment' && d.meaningful ? `advances ${goal.title}` : goal.title);
+  const area = !goal && d.suggested_life_area_id ? store.lifeAreas.find((x) => x.id === d.suggested_life_area_id) : null;
+  if (area) parts.push(area.name);
   if (d.matches_action_id) parts.push('completes a planned step');
   if (d.deadline) parts.push(`${d.deadline_type === 'hard' ? 'Due' : 'Target'} ${d.deadline}`);
   return (

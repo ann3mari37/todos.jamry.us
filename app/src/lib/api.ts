@@ -62,6 +62,8 @@ export function friendlyAiError(e: unknown): string {
       return "You're offline. Organized without AI — please check the items.";
     case 'ai_not_configured':
       return "AI isn't set up yet. Organized without AI — please check the items.";
+    case 'ai_quota':
+      return "AI is paused: the OpenAI account is out of credit. Organized without AI — please check the items.";
     case 'email_not_configured':
     case 'gmail_not_configured':
     case 'outlook_not_configured':

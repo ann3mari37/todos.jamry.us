@@ -116,6 +116,21 @@ describe('capture', () => {
     expect(r.items[3].title).toBe('Paid the electric bill');
     expect(r.items[2].title).toBe('Call the insurance company');
   });
+  it('splits "and also" into separate projects and guesses life areas without AI', () => {
+    const areas = [
+      { id: 'home', name: 'Home', archived_at: null },
+      { id: 'work', name: 'Work', archived_at: null },
+    ];
+    const r = fallbackInterpret('I need to paint my garage and also start a new app', areas);
+    expect(r.items.map((i) => [i.kind, i.title, i.suggested_life_area_id])).toEqual([
+      ['goal', 'Paint my garage', 'home'],
+      ['goal', 'Start a new app', 'work'],
+    ]);
+    expect(fallbackInterpret('Email Dana and book the dentist then pay rent').items.map((i) => i.title))
+      .toEqual(['Email Dana', 'Book the dentist', 'Pay rent']);
+    // "and" between nouns is not a split point.
+    expect(fallbackInterpret('Buy bread and butter').items.map((i) => i.title)).toEqual(['Buy bread and butter']);
+  });
   it('rejects AI output with unexpected fields', () => {
     expect(InterpretCaptureOutput.safeParse({ items: [], questions: [], extra: 1 }).success).toBe(false);
     expect(DecomposeGoalOutput.safeParse({ goal_id: 'nope', suggested_actions: [], questions: [], uncertainty_note: null }).success).toBe(false);
