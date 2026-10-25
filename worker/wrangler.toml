@@ -6,8 +6,12 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# The whole site: app files from ../app/dist, API calls handled by src/index.ts.
-routes = [{ pattern = "todos.jamry.us/*", zone_name = "jamry.us" }]
+# The whole site, on every address it runs at: app files from ../app/dist, API calls handled by src/index.ts.
+# The dashboard is a custom domain, so Cloudflare creates its DNS record and certificate itself.
+routes = [
+  { pattern = "todos.jamry.us/*", zone_name = "jamry.us" },
+  { pattern = "dashboard.malindaperryconsulting.com", custom_domain = true },
+]
 
 # Deployed automatically by Cloudflare Workers Builds on every push to main (see docs/OPERATIONS.md):
 #   root directory: worker   build command: npm ci && npm run build:app   deploy command: npx wrangler deploy
@@ -26,7 +30,8 @@ crons = ["17 13 * * *"] # daily, 13:17 UTC
 ENVIRONMENT = "production"
 AI_MODEL = "claude-opus-5-5"
 OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe" # optional voice input; needs OPENAI_API_KEY
-ALLOWED_ORIGINS = "https://todos.jamry.us"
+# Every address the app is served from (links and CORS follow the one a request came in on).
+ALLOWED_ORIGINS = "https://todos.jamry.us,https://dashboard.malindaperryconsulting.com"
 AI_HOURLY_LIMIT = "60"
 AI_DAILY_COST_CAP_USD = "1.00"
 APP_URL = "https://todos.jamry.us"

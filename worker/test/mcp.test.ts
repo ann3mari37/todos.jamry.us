@@ -58,6 +58,14 @@ describe('MCP connector', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 
+  it('names the address the chat connected to, when the app runs at several', async () => {
+    const both = { ...env, ALLOWED_ORIGINS: 'https://todos.jamry.us,https://dashboard.malindaperryconsulting.com' };
+    const res = await worker.fetch(new Request('https://dashboard.malindaperryconsulting.com/.well-known/oauth-protected-resource/api/mcp'), both as never);
+    expect(await res.json()).toMatchObject({ resource: 'https://dashboard.malindaperryconsulting.com/api/mcp' });
+    const other = await worker.fetch(new Request('https://evil.example/.well-known/oauth-protected-resource/api/mcp'), both as never);
+    expect(await other.json()).toMatchObject({ resource: 'https://todos.jamry.us/api/mcp' });
+  });
+
   it('passes Supabase authorization-server metadata through for older clients', async () => {
     supabase();
     const res = await worker.fetch(new Request('https://todos.jamry.us/.well-known/oauth-authorization-server'), env as never);

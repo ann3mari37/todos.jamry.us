@@ -5,6 +5,10 @@ import { FlowerArt } from '../src/components/FlowerArt';
 import { Banner, Button, Field, H1, IconButton, Muted, Screen } from '../src/components/ui';
 import { isConfigured, supabase } from '../src/lib/supabase';
 
+// Confirmation and reset emails link back to the site the person signed up on (todos.jamry.us or the dashboard).
+// Supabase only honours addresses listed under Auth → URL Configuration → Redirect URLs; others fall back to the Site URL.
+const here = typeof window !== 'undefined' && window.location?.origin?.startsWith('https://') ? window.location.origin : undefined;
+
 export default function SignIn() {
   const params = useLocalSearchParams<{ mode?: string; next?: string }>();
   // Where to go after signing in (e.g. an AI app's connection request). Same-site paths only.
@@ -18,7 +22,9 @@ export default function SignIn() {
   const submit = async () => {
     setBusy(true);
     setMsg(null);
-    const fn = mode === 'signup' ? supabase.auth.signUp({ email: email.trim(), password }) : supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const fn = mode === 'signup'
+      ? supabase.auth.signUp({ email: email.trim(), password, options: here ? { emailRedirectTo: here } : undefined })
+      : supabase.auth.signInWithPassword({ email: email.trim(), password });
     const { data, error } = await fn;
     setBusy(false);
     if (error) return setMsg(error.message);
@@ -28,7 +34,7 @@ export default function SignIn() {
 
   const reset = async () => {
     if (!email.trim()) return setMsg('Enter your email first.');
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), here ? { redirectTo: here } : undefined);
     setMsg(error ? error.message : 'A reset link is on its way.');
   };
 

@@ -7,7 +7,9 @@ import { Banner, Body, Button, Card, Divider, Icon, IconCircle, Muted, Segmented
 // "Connect your AI chat": step-by-step setup for Claude, ChatGPT or any MCP app, with a live check that turns green
 // as soon as the person allows the connection. Used in the welcome walkthrough and on the Connect screen.
 
-export const CONNECTOR_URL = `${process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || 'https://todos.jamry.us'}/api/mcp`;
+// The connector lives on whichever address the app is open at (todos.jamry.us, the MaLinda Perry dashboard…).
+export const CONNECTOR_URL = `${process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '')
+  || (typeof window !== 'undefined' && window.location?.origin?.startsWith('https://') ? window.location.origin : 'https://todos.jamry.us')}/api/mcp`;
 
 type App = 'claude' | 'chatgpt' | 'other';
 

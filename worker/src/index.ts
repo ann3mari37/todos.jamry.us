@@ -121,8 +121,20 @@ const DATA_ROUTES: Record<string, Handler> = {
   '/api/email/modify': async (req, env, c) => email.modifyMessages(env, c.db, c.userId, parse(email.ModifyInput, await readJson(req))),
 };
 
+/**
+ * The site this request came in on (todos.jamry.us, dashboard.malindaperryconsulting.com…). Links the Worker builds
+ * (AI-chat review links, sign-in discovery, email return pages) point back to the same site. Only the sites listed in
+ * ALLOWED_ORIGINS count; anything else falls back to APP_URL.
+ */
+export function siteFor(req: Request, env: Env): Env {
+  const host = new URL(req.url).host;
+  const site = (env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).find((o) => o.replace(/^https?:\/\//, '') === host);
+  return site ? { ...env, APP_URL: site, API_URL: site } : env;
+}
+
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, baseEnv: Env): Promise<Response> {
+    const env = siteFor(req, baseEnv);
     const { pathname: path } = new URL(req.url);
     // The AI-chat connector (MCP) and its sign-in discovery documents. Open CORS: they use bearer tokens, never cookies.
     if (path === '/api/mcp') return handleMcp(req, env);
