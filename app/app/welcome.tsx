@@ -12,7 +12,8 @@ const WASH = '#F8DCDC';
 export default function Welcome() {
   const { width, height } = useWindowDimensions();
   // The flower fills the top of the screen and bleeds past the sides, like the design.
-  const art = Math.min(Math.max(width * 1.25, 420), 760, height * 0.78);
+  // Short windows (desktop browsers) keep ~330px clear for the wordmark and buttons.
+  const art = Math.min(Math.max(width * 1.25, 420), 760, height * 0.78, Math.max(240, height - 330));
   return (
     <View style={{ flex: 1, backgroundColor: WASH, overflow: 'hidden' }}>
       <LinearGradient colors={['#FBE6E4', WASH, '#F3C9CC']} locations={[0, 0.55, 1]} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
