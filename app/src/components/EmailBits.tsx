@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import type { EmailCategory } from '../core/ai-contracts';
 import { friendlyDate, toISODate } from '../core/dates';
-import type { EmailDigest } from '../lib/store';
+import { useStore, type EmailDigest } from '../lib/store';
 import { colors, fonts, radius, shadow } from '../theme';
 import { Body, Icon, Muted, type IconName } from './ui';
 
@@ -43,4 +43,14 @@ export function DigestCard({ digest, onOpen, compact }: { digest: EmailDigest; o
       </View>
     </View>
   );
+}
+
+/** Whether this server can connect any inbox (null while checking). Accounts already connected always count. */
+export function useEmailAvailable(): boolean | null {
+  const store = useStore();
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    store.emailProviders().then((p) => setOk(p.gmail || p.outlook || p.imap)).catch(() => setOk(false));
+  }, [store.emailProviders]);
+  return store.emailAccounts.length > 0 ? true : ok;
 }

@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import React from 'react';
 import { View } from 'react-native';
 import { Card, Divider, H1, Muted, Row, Screen } from '../../src/components/ui';
+import { useEmailAvailable } from '../../src/components/EmailBits';
 import { useStore } from '../../src/lib/store';
 import { colors } from '../../src/theme';
 
@@ -16,14 +17,19 @@ const SECTIONS = [
 
 export default function More() {
   const store = useStore();
+  const email = useEmailAvailable();
   return (
     <Screen>
       <H1 style={{ marginTop: 8, marginBottom: 14 }}>Settings</H1>
       <Card style={{ paddingVertical: 4 }}>
-        <Row icon="mail" iconColor={colors.pink} title="Inbox" subtitle="Digest, summaries and email tasks" onPress={() => router.push('/inbox')} />
-        <Divider />
-        <Row icon="at-sign" iconColor={colors.pink} title="Email Accounts" subtitle={store.emailAccounts.length ? `${store.emailAccounts.length} connected` : 'Connect Gmail, Outlook, iCloud…'} onPress={() => router.push('/email-accounts')} />
-        <Divider />
+        {email && (
+          <>
+            <Row icon="mail" iconColor={colors.pink} title="Inbox" subtitle="Digest, summaries and email tasks" onPress={() => router.push('/inbox')} />
+            <Divider />
+            <Row icon="at-sign" iconColor={colors.pink} title="Email Accounts" subtitle={store.emailAccounts.length ? `${store.emailAccounts.length} connected` : 'Connect your inbox'} onPress={() => router.push('/email-accounts')} />
+            <Divider />
+          </>
+        )}
         <Row icon="grid" iconColor={colors.pink} title="Life Areas" subtitle="Home, Work, Health…" onPress={() => router.push('/life-areas')} />
         <Divider />
         <Row icon="clock" iconColor={colors.pink} title="History" subtitle="Everything you've done" onPress={() => router.push('/history')} />

@@ -43,6 +43,8 @@ export default function EmailAccounts() {
   const [areaFor, setAreaFor] = useState<EmailAccount | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [available, setAvailable] = useState<{ gmail: boolean; outlook: boolean; imap: boolean } | null>(null);
+  // null while loading; false when this server can't connect any inbox yet.
+  const canConnect = available ? available.gmail || available.outlook || available.imap : null;
 
   useEffect(() => {
     if (params.connected) { setNotice(`${params.connected === 'gmail' ? 'Gmail' : 'Outlook'} connected. Syncing your recent mail…`); store.refresh().then(() => store.emailSync(true)).catch(() => {}); }
@@ -107,13 +109,24 @@ export default function EmailAccounts() {
         );
       })}
 
-      {store.emailAccounts.length === 0 && (
+      {canConnect === false ? (
+        // Nothing can be connected on this server yet: say so instead of offering buttons that can't work.
         <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
-          <Icon name="mail" size={26} color={colors.pink} />
-          <Body style={{ fontFamily: fonts.medium, marginTop: 8 }}>No inboxes connected yet</Body>
+          <Icon name="mail" size={26} color={colors.textFaint} />
+          <Body style={{ fontFamily: fonts.medium, marginTop: 8 }}>Email isn't available yet</Body>
+          <Muted style={{ textAlign: 'center', marginTop: 4, maxWidth: 320 }}>Connecting inboxes hasn't been switched on for this app. Everything else works without it.</Muted>
         </Card>
+      ) : (
+        <>
+          {store.emailAccounts.length === 0 && (
+            <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
+              <Icon name="mail" size={26} color={colors.pink} />
+              <Body style={{ fontFamily: fonts.medium, marginTop: 8 }}>No inboxes connected yet</Body>
+            </Card>
+          )}
+          <Button title="Add an email account" icon="plus" variant={store.emailAccounts.length ? 'soft' : 'primary'} onPress={() => setAdding(true)} style={{ marginTop: 4 }} />
+        </>
       )}
-      <Button title="Add an email account" icon="plus" variant={store.emailAccounts.length ? 'soft' : 'primary'} onPress={() => setAdding(true)} style={{ marginTop: 4 }} />
 
       <Card style={{ marginTop: 16, paddingVertical: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, minHeight: 52, gap: 12 }}>
@@ -130,18 +143,20 @@ export default function EmailAccounts() {
       </Muted>
 
       <Sheet visible={adding && !imap} onClose={() => setAdding(false)} title="Add an email account">
-        {available && !available.imap && (
-          <Banner tone="soft" text="Email isn't switched on for this app yet. The server needs its email encryption key before any inbox can be connected. It's a one-time setup step for the app's owner (see docs/OPERATIONS.md, Email setup)." />
+        {/* Only connections this server can actually make are shown. */}
+        {available?.gmail && <ProviderButton icon="mail" title="Gmail or Google Workspace" subtitle="Sign in with Google" onPress={() => connect('gmail')} />}
+        {available?.outlook && <ProviderButton icon="inbox" title="Outlook, Hotmail or Microsoft 365" subtitle="Sign in with Microsoft" onPress={() => connect('outlook')} />}
+        {available?.imap && (
+          <>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.textMuted, marginTop: available.gmail || available.outlook ? 14 : 0, marginBottom: 6 }}>
+              {available.gmail || available.outlook ? 'OTHER PROVIDERS' : 'CHOOSE YOUR EMAIL PROVIDER'}
+            </Text>
+            <Muted style={{ marginBottom: 8 }}>Connect with an app password from your provider.</Muted>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {IMAP_PRESETS.filter((p) => !(p.key === 'gmail-imap' && available.gmail)).map((p) => <Chip key={p.key} label={p.label} onPress={() => setImap(p)} />)}
+            </View>
+          </>
         )}
-        {available && available.imap && (!available.gmail || !available.outlook) && (
-          <Banner tone="soft" text={`${[!available.gmail && 'Google', !available.outlook && 'Microsoft'].filter(Boolean).join(' and ')} sign-in isn't set up on the server yet, so ${!available.gmail && !available.outlook ? 'those buttons are' : 'that button is'} greyed out. You can still connect any inbox below with an app password, including Gmail.`} />
-        )}
-        <ProviderButton icon="mail" title="Gmail or Google Workspace" subtitle="Sign in with Google" disabled={available ? !available.gmail : false} onPress={() => connect('gmail')} />
-        <ProviderButton icon="inbox" title="Outlook, Hotmail or Microsoft 365" subtitle="Sign in with Microsoft" disabled={available ? !available.outlook : false} onPress={() => connect('outlook')} />
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.textMuted, marginTop: 14, marginBottom: 6 }}>OTHER PROVIDERS (IMAP)</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', opacity: available && !available.imap ? 0.45 : 1 }} pointerEvents={available && !available.imap ? 'none' : 'auto'}>
-          {IMAP_PRESETS.map((p) => <Chip key={p.key} label={p.label} onPress={() => setImap(p)} />)}
-        </View>
       </Sheet>
 
       <ImapSheet preset={imap} onClose={() => setImap(null)} onDone={() => { setImap(null); setAdding(false); setNotice('Connected. Syncing your recent mail…'); store.emailSync(true).catch(() => {}); }} />
@@ -158,14 +173,14 @@ export default function EmailAccounts() {
   );
 }
 
-function ProviderButton({ icon, title, subtitle, onPress, disabled }: { icon: IconName; title: string; subtitle: string; onPress: () => void; disabled?: boolean }) {
+function ProviderButton({ icon, title, subtitle, onPress }: { icon: IconName; title: string; subtitle: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityState={{ disabled: !!disabled }}
-      style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginBottom: 10, opacity: disabled ? 0.45 : 1 }, pressed && { opacity: 0.7 }]}>
+    <Pressable onPress={onPress} accessibilityRole="button"
+      style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginBottom: 10 }, pressed && { opacity: 0.7 }]}>
       <Icon name={icon} size={22} color={colors.pink} />
       <View style={{ flex: 1 }}>
         <Body style={{ fontFamily: fonts.medium }}>{title}</Body>
-        <Muted>{disabled ? 'Not configured on the server yet' : subtitle}</Muted>
+        <Muted>{subtitle}</Muted>
       </View>
       <Icon name="chevron-right" size={18} color={colors.textFaint} />
     </Pressable>

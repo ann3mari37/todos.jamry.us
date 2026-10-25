@@ -117,7 +117,7 @@ export function TaskList({ tasks, limit, emptyText }: { tasks: Action[]; limit?:
           <>
             {why && <Muted style={{ marginBottom: 6 }}>Why it matters: {why}</Muted>}
             <SheetOption icon="check-circle" label="Mark done" onPress={() => complete(live)} />
-            {projectLike && <SheetOption icon="folder-plus" label="Turn into a project (it has several steps)" onPress={() => makeProject(live)} />}
+            {!live.goal_id && <SheetOption icon="folder-plus" label={projectLike ? 'Turn into a project (it has several steps)' : 'Make this a project'} onPress={() => makeProject(live)} />}
             <SheetOption icon="calendar" label={live.due_date ? `Due date: ${friendlyDate(live.due_date)}` : 'Set a due date'} onPress={() => setPanel('due')} />
             {!live.goal_id && <SheetOption icon="grid" label={`Life area: ${store.lifeAreas.find((x) => x.id === live.life_area_id)?.name ?? 'none'}`} onPress={() => setPanel('area')} />}
             {openGoal && <SheetOption icon="folder" label={`Open project: ${openGoal.title}`} onPress={() => { close(); router.push({ pathname: '/project/[id]', params: { id: openGoal.id } }); }} />}

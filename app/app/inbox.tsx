@@ -252,10 +252,10 @@ function MessageSheet({ m, onClose }: { m: EmailMessage | null; onClose: () => v
           {live.status !== 'tasks_created'
             ? <SheetOption icon="plus-circle" label={live.suggested_actions.length || live.thread_next_steps.length ? 'Turn into tasks' : 'Create a task from this'} onPress={proposeTasks} />
             : <SheetOption icon="check-circle" label="Already in your plan — add another task" onPress={proposeTasks} />}
-          <SheetOption icon="archive" label={busy === 'archive' ? 'Archiving…' : 'Archive'} onPress={() => run('archive', () => store.emailModify([live.id], 'archive'), true)} />
-          {live.is_unread && <SheetOption icon="eye" label="Mark as read" onPress={() => run('read', () => store.emailModify([live.id], 'mark_read'))} />}
-          <SheetOption icon="tag" label="Add a label" onPress={() => setLabeling(true)} />
-          {live.category === 'action_needed' && <SheetOption icon="x-circle" label="Doesn't need me" onPress={() => run('dismiss', () => store.emailModify([live.id], 'dismiss'), true)} />}
+          <SheetOption icon="archive" label={busy === 'archive' ? 'Archiving…' : 'Archive (in your mailbox too)'} onPress={() => run('archive', () => store.emailModify([live.id], 'archive'), true)} />
+          {live.is_unread && <SheetOption icon="eye" label="Mark as read (in your mailbox too)" onPress={() => run('read', () => store.emailModify([live.id], 'mark_read'))} />}
+          <SheetOption icon="tag" label="Add a label (in your mailbox too)" onPress={() => setLabeling(true)} />
+          {live.category === 'action_needed' && <SheetOption icon="x-circle" label="Doesn't need me (hides it here only)" onPress={() => run('dismiss', () => store.emailModify([live.id], 'dismiss'), true)} />}
         </View>
       )}
     </Sheet>

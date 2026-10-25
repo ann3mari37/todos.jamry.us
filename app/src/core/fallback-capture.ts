@@ -8,7 +8,8 @@ export { guessLifeArea } from './rules';
 
 const PAST_TENSE = /^(i\s+)?(already\s+)?(just\s+)?(paid|called|sent|cleaned|finished|did|made|fixed|returned|booked|bought|emailed|wrote|submitted|completed|took|went|cooked|walked|ran|read|washed|picked up|dropped off|cancelled|canceled|organized|scheduled|replied|texted|filed|signed|mailed|ordered|tidied|vacuumed|mowed|painted|started|built|launched|renewed|updated|moved|sold)\b/i;
 // Outcomes that usually take several steps become projects (goals); everything else is a single action.
-const GOAL_HINT = /\b(organi[sz]e|plan|launch|build|renovate|remodel|improve|learn|finish|complete|submit|prepare|redo|overhaul|paint|start|create|design|develop|write (a|my|the)|move|declutter|set up|get .* in order)\b/i;
+// Word stems, so typos and endings still count ("createa", "building", "planning").
+const GOAL_HINT = /\b(organi[sz]\w*|plan|planning|launch\w*|build\w*|renovat\w*|remodel\w*|improv\w*|learn\w*|finish\w*|complet\w*|submit\w*|prepar\w*|redo|overhaul\w*|paint\w*|start\w*|creat\w*|design\w*|develop\w*|write (a|an|my|the)|move|moving|declutter\w*|set ?up|get .* in order)\b/i;
 const LEAD_IN = /^(i\s+(also\s+)?(need|have|want|should|must|gotta|got|would like)\s+to\s+|also\s+need\s+to\s+|need\s+to\s+|to\s+|and\s+(also\s+|then\s+)?|also\s+|then\s+|plus\s+)/i;
 
 // Words that can start a new item after "and" ("…the garage and start a new app").

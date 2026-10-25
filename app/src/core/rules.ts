@@ -144,7 +144,8 @@ export function suggestWhy(
 
 // ───────────────────────── Project detection ─────────────────────────
 
-const PROJECT_WORDS = /\b(create|build|start|launch|design|develop|plan|organi[sz]e|renovate|remodel|redo|overhaul|set up|write (a|an|my|the)|learn|move|declutter|paint|prepare for|get .* in order)\b/i;
+// Word stems, so typos and endings still count ("createa new app", "building a deck").
+const PROJECT_WORDS = /\b(creat\w*|build\w*|start\w*|launch\w*|design\w*|develop\w*|plan|planning|organi[sz]\w*|renovat\w*|remodel\w*|redo|overhaul\w*|set ?up|write (a|an|my|the)|learn\w*|move|moving|declutter\w*|paint\w*|prepar\w* for|get .* in order)\b/i;
 
 /** A task that reads like an outcome needing several steps ("Create a project management app for Malinda"). */
 export function looksLikeProject(title: string): boolean {

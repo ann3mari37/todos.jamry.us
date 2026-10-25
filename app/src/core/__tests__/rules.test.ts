@@ -119,3 +119,13 @@ describe('why it matters + project detection', () => {
     expect(looksLikeProject('Plan')).toBe(false);
   });
 });
+
+describe('project detection tolerates typos and endings', () => {
+  it('turns "createa new app" into a project at capture', () => {
+    const r = fallbackInterpret('createa new app', [{ id: 'work', name: 'Work', archived_at: null }]);
+    expect(r.items[0]).toMatchObject({ kind: 'goal', title: 'Createa new app', suggested_life_area_id: 'work' });
+    expect(looksLikeProject('createa new app')).toBe(true);
+    expect(looksLikeProject('Building a deck for the yard')).toBe(true);
+    expect(looksLikeProject('Call the planner')).toBe(false);
+  });
+});

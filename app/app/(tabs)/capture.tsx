@@ -13,7 +13,7 @@ type Draft = CaptureItem & { client_id: string; meaning: string; meaningful: boo
 type Mode = 'any' | 'did' | 'goal';
 
 const KIND_META: Record<Draft['kind'], { label: string; icon: IconName; color: string; soft: string }> = {
-  goal: { label: 'Goal', icon: 'file-text', color: colors.pink, soft: colors.pinkWash },
+  goal: { label: 'Project', icon: 'folder', color: colors.pink, soft: colors.pinkWash },
   action: { label: 'Action', icon: 'arrow-right-circle', color: colors.teal, soft: colors.tealSoft },
   accomplishment: { label: 'Accomplishment', icon: 'check-circle', color: colors.green, soft: colors.greenSoft },
   note: { label: 'Note', icon: 'edit-3', color: colors.lavender, soft: colors.lavenderSoft },
