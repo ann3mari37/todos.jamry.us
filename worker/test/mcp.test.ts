@@ -81,7 +81,7 @@ describe('MCP connector', () => {
     expect(odd.result.protocolVersion).toBe('2025-11-25');
     expect((await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' })).status).toBe(202);
     const list = await call({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(['get_overview', 'get_today', 'send_plan', 'add_task', 'create_project', 'update_task', 'complete_task', 'get_inbox', 'read_email_thread', 'save_email_briefing', 'email_action']);
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(['get_overview', 'get_today', 'send_plan', 'add_task', 'create_project', 'update_task', 'update_project', 'complete_task', 'get_inbox', 'read_email_thread', 'save_email_briefing', 'email_action']);
     const missing = await call({ jsonrpc: '2.0', id: 4, method: 'nope' });
     expect(missing.error.code).toBe(-32601);
   });

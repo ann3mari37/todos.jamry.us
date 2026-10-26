@@ -181,6 +181,24 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: 'update_project',
+    title: 'Change a project',
+    description: 'Changes a project: its title, why it matters, life area, or due date. Use project ids from get_overview. For the order of its steps, use update_task with position.',
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string', maxLength: 200 },
+        why: { type: 'string', maxLength: 500 },
+        area: { type: 'string', maxLength: 60, description: 'Life area name' },
+        due_date: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear' },
+        hard_deadline: { type: 'boolean' },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
     name: 'complete_task',
     title: 'Mark a task done',
     description: 'Marks a task as done and records it in their history (it counts as progress on its project). Use a task id from get_overview.',
@@ -236,6 +254,7 @@ const INSTRUCTIONS = [
   'Use add_task / create_project only for a single thing they clearly asked to add now.',
   'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
   'Email: for "what is in my email" or "what should I answer first", call get_inbox, read the threads that matter with read_email_thread, then save_email_briefing with a cohesive paragraph and a ranked do_first list, and tell them the same. Offer send_plan (with from_email) to turn emails into tasks. Archive or label only when asked.',
+  'Keep their lists true to the plan: when you learn a step’s real size, a date moving, or a better order, fix it with update_task (minutes, due_date, position) or update_project (due_date) and tell them what you changed. Steps you add later go to the end of their project, so set position when they belong earlier.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
 
@@ -254,6 +273,14 @@ const UpdateInput = z.object({
   waiting: z.boolean().optional(),
   minutes: z.preprocess(numberish, z.number().int().min(1).max(600).nullable().optional()),
   position: z.preprocess(numberish, z.number().int().min(1).optional()),
+});
+const ProjectUpdateInput = z.object({
+  id: z.string().uuid(),
+  title: z.string().trim().min(1).max(200).optional(),
+  why: z.string().trim().max(500).optional(),
+  area: z.string().trim().max(60).optional(),
+  due_date: z.string().regex(/^d{4}-d{2}-d{2}$/).nullable().optional(),
+  hard_deadline: z.boolean().optional(),
 });
 const PlanInput = z.object({ summary: z.string().trim().max(2000).default(''), items: z.array(HandoffItem).min(1).max(20) });
 const IdInput = z.object({ id: z.string().uuid() });
@@ -285,7 +312,7 @@ async function overview(ctx: Ctx) {
         id: g.id, title: g.title, status: g.status, area: areaName(areas, g.life_area_id), why: g.meaning,
         health: g.status === 'active' ? (({ label, message }) => ({ label, message }))(projectHealth(g, actions)) : null,
         due: g.deadline ? `${g.deadline}${g.deadline_type === 'hard' ? ' (hard deadline)' : ''}` : null,
-        open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 30).map((a) => ({ id: a.id, title: a.title, minutes: a.estimated_minutes, waiting: a.status === 'waiting' })),
+        open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 30).map((a) => ({ id: a.id, title: a.title, minutes: a.estimated_minutes, due: a.due_date, waiting: a.status === 'waiting' })),
         last_progress: g.last_meaningful_progress_at?.slice(0, 10) ?? null,
       };
     }),
@@ -438,6 +465,28 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
   return { status: 'updated', id: task.id, changed };
 }
 
+async function updateProject(ctx: Ctx, input: z.infer<typeof ProjectUpdateInput>) {
+  const { areas, goals } = await load(ctx);
+  const goal = goals.find((g) => g.id === input.id);
+  if (!goal) throw new ToolError('No open project with that id. Call get_overview for current ids.');
+  const p: Record<string, unknown> = {};
+  if (input.title) p.title = input.title;
+  if (input.why !== undefined) Object.assign(p, { meaning: input.why || null, meaning_source: input.why ? 'user' : 'none' });
+  if (input.area !== undefined) {
+    const n = input.area.toLowerCase();
+    const area = areas.find((a) => a.name.toLowerCase() === n) ?? areas.find((a) => a.name.toLowerCase().startsWith(n));
+    if (!area) throw new ToolError(`No life area called "${input.area}". Their areas: ${areas.map((a) => a.name).join(', ')}.`);
+    p.life_area_id = area.id;
+  }
+  if (input.due_date !== undefined) {
+    p.deadline = input.due_date;
+    p.deadline_type = input.due_date ? (input.hard_deadline ? 'hard' : 'target') : 'none';
+  } else if (input.hard_deadline !== undefined && goal.deadline) p.deadline_type = input.hard_deadline ? 'hard' : 'target';
+  if (!Object.keys(p).length) throw new ToolError('Nothing to change.');
+  await must(ctx.db.from('goals').update(p).eq('id', goal.id).select('id'));
+  return { status: 'updated', id: goal.id, changed: Object.keys(p).filter((k) => k !== 'meaning_source') };
+}
+
 async function completeTask(ctx: Ctx, id: string) {
   const { error } = await ctx.db.rpc('complete_action', { p_action_id: id, p_occurred_at: new Date().toISOString() });
   if (error) throw new ToolError('Could not mark that task done. Check the id with get_overview.');
@@ -498,6 +547,7 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
     case 'add_task': return addNow(ctx, { ...parse(HandoffItem.omit({ kind: true }), args), kind: 'task' });
     case 'create_project': return addNow(ctx, { ...parse(HandoffItem.omit({ kind: true, project: true, minutes: true }), args), kind: 'project' });
     case 'update_task': return updateTask(ctx, parse(UpdateInput, args));
+    case 'update_project': return updateProject(ctx, parse(ProjectUpdateInput, args));
     case 'complete_task': return completeTask(ctx, parse(IdInput, args).id);
     case 'get_inbox': return inbox(ctx, parse(InboxInput, args));
     case 'read_email_thread': {
