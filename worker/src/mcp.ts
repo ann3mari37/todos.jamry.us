@@ -429,7 +429,7 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
     // Renumber the project's open steps with this one in its new place (done steps keep their numbers below).
     const steps = actions.filter((a) => a.goal_id === goalId && a.id !== task.id);
     steps.splice(Math.min(input.position, steps.length + 1) - 1, 0, task);
-    const done = await must(ctx.db.from('actions').select('sort_order').eq('goal_id', goalId).eq('status', 'done').order('sort_order', { ascending: false }).limit(1)) as { sort_order: number }[];
+    const done = await must(ctx.db.from('actions').select('sort_order').eq('goal_id', goalId).eq('status', 'completed').order('sort_order', { ascending: false }).limit(1)) as { sort_order: number }[];
     const base = (done[0]?.sort_order ?? -1) + 1;
     await Promise.all(steps.map((a, i) => a.sort_order === base + i && a.id !== task.id ? null : must(ctx.db.from('actions').update({ sort_order: base + i }).eq('id', a.id).select('id'))));
     changed.push('position');
