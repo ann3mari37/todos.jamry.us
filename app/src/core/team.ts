@@ -62,3 +62,45 @@ export function resolveAssignee(input: string, teamId: string, me: string, t: Te
   const roleNames = roles.map((r) => r.name).join(', ') || 'none yet';
   return { error: `No one on this team matches "${input}". People: ${people}. Roles: ${roleNames}.` };
 }
+
+export interface TeamUpdates {
+  /** Teammates' steps finished recently on projects you share, newest first. */
+  finished: { action: Action; by: string; goal: Pick<Goal, 'id' | 'title'> | null }[];
+  /** Your steps that were waiting on a teammate's step and can start now. */
+  unblocked: Action[];
+  /** Your steps still waiting on a teammate's step, with whose. */
+  waiting: { action: Action; on: Action; who: string }[];
+}
+
+/**
+ * What your team did that matters to you: recent finishes on shared projects, and your steps that waited on them.
+ * Only reads; nothing here changes your own suggestions.
+ */
+export function teamUpdates(input: {
+  all: Action[]; goals: Pick<Goal, 'id' | 'title' | 'team_id'>[]; dependencies: { action_id: string; depends_on_id: string }[];
+  me: string; team: TeamData; now?: Date; days?: number;
+}): TeamUpdates {
+  const { all, goals, dependencies, me, team } = input;
+  const since = (input.now ?? new Date()).getTime() - (input.days ?? 3) * 86_400_000;
+  const byId = new Map(all.map((a) => [a.id, a]));
+  const name = (id: string | null | undefined) => team.members.find((m) => m.user_id === id)?.display_name ?? 'A teammate';
+  const shared = new Set(goals.filter((g) => g.team_id).map((g) => g.id));
+  const OPEN = ['ready', 'in_progress', 'waiting', 'blocked'];
+  const finished = all
+    .filter((a) => a.status === 'completed' && a.completed_by && a.completed_by !== me && a.goal_id && shared.has(a.goal_id)
+      && a.completed_at && new Date(a.completed_at).getTime() >= since)
+    .sort((x, y) => (y.completed_at ?? '').localeCompare(x.completed_at ?? ''))
+    .map((a) => ({ action: a, by: name(a.completed_by), goal: goals.find((g) => g.id === a.goal_id) ?? null }));
+  const mine = all.filter((a) => OPEN.includes(a.status) && isMine(a, goals as Goal[], me, team));
+  const unblocked: Action[] = [];
+  const waiting: TeamUpdates['waiting'] = [];
+  for (const a of mine) {
+    const on = dependencies.filter((d) => d.action_id === a.id).map((d) => byId.get(d.depends_on_id)).filter((x): x is Action => !!x);
+    const theirs = on.filter((b) => b.completed_by !== me && !isMine(b, goals as Goal[], me, team));
+    if (!theirs.length) continue;
+    const open = theirs.find((b) => b.status !== 'completed');
+    if (open) waiting.push({ action: a, on: open, who: open.assignee_id ? name(open.assignee_id) : assigneeLabel(open, team) ?? 'a teammate' });
+    else if (on.every((b) => b.status === 'completed') && theirs.some((b) => b.completed_at && new Date(b.completed_at).getTime() >= since)) unblocked.push(a);
+  }
+  return { finished, unblocked, waiting };
+}

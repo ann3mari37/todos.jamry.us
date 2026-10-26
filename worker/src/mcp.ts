@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { handoffToDrafts, draftsToCommit, HandoffItem, type HandoffInterpretation } from '../../app/src/core/handoff';
 import { recommend, KIND_LABEL } from '../../app/src/core/recommend';
-import { assigneeLabel, isMine, resolveAssignee, type TeamData } from '../../app/src/core/team';
+import { assigneeLabel, isMine, resolveAssignee, teamUpdates, type TeamData } from '../../app/src/core/team';
 import type { Action, Goal, LifeArea, Team, TeamMember, TeamMemberRole, TeamRole } from '../../app/src/core/types';
 import { crunch, projectHealth, staleTasks } from '../../app/src/core/workload';
 import { emailLink, emailRef, oneLine, scoreEmail, type BriefAccount, type BriefMessage } from '../../app/src/core/emailBrief';
@@ -150,7 +150,7 @@ const TOOLS = [
     name: 'add_task',
     title: 'Add a task now',
     description: 'Adds one task straight to their list, without review. Use only when they clearly ask to add something specific ("add call the dentist tomorrow"); for plans use send_plan. A task added to a project goes after its existing steps. Give minutes when you know the size of the work; otherwise leave it out rather than guess.',
-    inputSchema: { type: 'object', required: ['title'], properties: { ...taskProps, notes: { type: 'string', maxLength: 4000, description: 'The task’s details: links, who to call, specifics' }, assignee: { type: 'string', maxLength: 80, description: "Team projects only: who does it. A teammate’s name, a role name (anyone holding the role can take it), \"me\", or \"none\". See teams in get_overview." } } },
+    inputSchema: { type: 'object', required: ['title'], properties: { ...taskProps, notes: { type: 'string', maxLength: 4000, description: 'The task’s details: links, who to call, specifics' }, assignee: { type: 'string', maxLength: 80, description: 'Who does it: a teammate’s name or a role name (giving it to someone else shares the project with them automatically), "me", or "none". See teams in get_overview.' } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
@@ -170,7 +170,7 @@ const TOOLS = [
   {
     name: 'update_task',
     title: 'Change a task',
-    description: 'Changes a task: its title, life area, project, date, estimated minutes, its place among its project’s steps, who on the team does it, or whether it is waiting on someone. Use task ids from get_overview (each project lists its open steps in order). To put a project’s steps in order, call this with position for each step that is out of place.',
+    description: 'Changes a task: its title, life area, project, date, estimated minutes, its place among its project’s steps, who on the team does it, which steps it waits for, or whether it is waiting on someone. Use task ids from get_overview (each project lists its open steps in order). To put a project’s steps in order, call this with position for each step that is out of place.',
     inputSchema: {
       type: 'object',
       required: ['id'],
@@ -185,7 +185,8 @@ const TOOLS = [
         minutes: { type: ['integer', 'null'], minimum: 1, maximum: 600, description: 'Estimated minutes, or null to clear a wrong estimate' },
         position: { type: 'integer', minimum: 1, description: "Where it goes among its project's open steps: 1 = first. Larger than the number of steps = last." },
         notes: { type: ['string', 'null'], maxLength: 4000, description: 'The task’s details (links, who to call, specifics). Replaces what is there: start from the notes in get_overview to keep them. Empty or null clears.' },
-        assignee: { type: 'string', maxLength: 80, description: "Team projects only: who does it. A teammate’s name, a role name (anyone holding the role can take it), \"me\", or \"none\". See teams in get_overview." },
+        assignee: { type: 'string', maxLength: 80, description: 'Who does it: a teammate’s name, a role name (anyone holding the role can take it), "me", or "none". Giving a step to a teammate shares its project with them automatically. See teams in get_overview.' },
+        waits_for: { type: 'array', maxItems: 10, items: { type: 'string' }, description: 'Ids of steps that must be finished before this one can start (often a teammate’s step). Replaces the current list; [] clears it. The step stays off their Today until those are done.' },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -266,7 +267,7 @@ const INSTRUCTIONS = [
   'Use add_task / create_project only for a single thing they clearly asked to add now.',
   'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
   'Email: for "what is in my email" or "what should I answer first", call get_inbox, read the threads that matter with read_email_thread, then save_email_briefing with a cohesive paragraph and a ranked do_first list, and tell them the same. Offer send_plan (with from_email) to turn emails into tasks. Archive or label only when asked.',
-  'Teams: if get_overview lists teams, work shared with others belongs on a team project (create_project with team, or update_project team). Give every step on a team project an assignee: the person when it is clearly theirs, otherwise the role whose description fits (a role leaves it open to anyone holding it). Steps that say "needs the coach" or similar go to that role or person. Use the exact names from teams; never invent people or roles, and if a role is missing, tell them to add it under Settings, Team. Their Today only shows team steps assigned to them or their role.',
+  'Teams: if get_overview lists teams, keep it light; they do not want to organize team projects. Leave their own steps alone and only set assignee on steps someone else should do: the person when it is clearly theirs, otherwise the role whose description fits (open to anyone holding it). That shares the project with the team automatically. When one of their steps cannot start until a teammate finishes something, set waits_for on it; it stays off their Today until then, and team_updates tells them when it is their turn. Use the exact names from teams; never invent people or roles, and if a role is missing, tell them to add it under Settings, Team.',
   'Keep their lists true to the plan: when you learn a step’s real size, a date moving, or a better order, fix it with update_task (minutes, due_date, position, notes) or update_project (due_date, add_note). Put specifics (links, who to call, decisions) in a task’s notes, its details section, and tell them what you changed. Steps you add later go to the end of their project, so set position when they belong earlier.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
@@ -288,6 +289,7 @@ const UpdateInput = z.object({
   position: z.preprocess(numberish, z.number().int().min(1).optional()),
   notes: z.preprocess((v) => v === 'null' ? null : v, z.string().max(4000).nullable().optional()),
   assignee: z.string().trim().max(80).optional(),
+  waits_for: z.array(z.string().uuid()).max(10).optional(),
 });
 const ProjectUpdateInput = z.object({
   id: z.string().uuid(),
@@ -340,9 +342,24 @@ async function overview(ctx: Ctx) {
   const stale = staleTasks(mineActions, mineGoals);
   const pinned = await pins(ctx, actions);
   const me = ctx.userId;
+  // Dependencies (theirs only: each person's own) and teammates' recent finishes, for waits_for and team_updates.
+  const [deps, recentDone] = await Promise.all([
+    must(ctx.db.from('action_dependencies').select('action_id,depends_on_id')) as Promise<{ action_id: string; depends_on_id: string }[]>,
+    teams.length ? must(ctx.db.from('actions').select('*').eq('status', 'completed').gte('completed_at', new Date(Date.now() - 3 * 86_400_000).toISOString())) as Promise<Action[]> : Promise.resolve([] as Action[]),
+  ]);
+  const titleOf = (id: string) => [...actions, ...recentDone].find((a) => a.id === id)?.title ?? null;
+  const waitsFor = (a: Action) => deps.filter((d) => d.action_id === a.id).map((d) => titleOf(d.depends_on_id) ?? 'a finished step');
+  const updates = teams.length ? teamUpdates({ all: [...actions, ...recentDone], goals, dependencies: deps, me, team }) : null;
   return {
     ...pinned,
     life_areas: areas.map((a) => a.name),
+    ...(updates && (updates.finished.length || updates.unblocked.length || updates.waiting.length) ? {
+      team_updates: {
+        teammates_finished: updates.finished.map((f) => ({ who: f.by, step: f.action.title, project: f.goal?.title ?? null, when: f.action.completed_at })),
+        your_turn_now: updates.unblocked.map((a) => ({ task_id: a.id, title: a.title })),
+        still_waiting: updates.waiting.map((w) => ({ task_id: w.action.id, title: w.action.title, waiting_on: w.on.title, who: w.who.replace(' · open', ' (role, not taken yet)') })),
+      },
+    } : {}),
     ...(teams.length ? {
       teams: teams.map((t) => ({
         name: t.name,
@@ -363,6 +380,7 @@ async function overview(ctx: Ctx) {
         open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 30).map((a) => ({
           id: a.id, title: a.title, minutes: a.estimated_minutes, due: a.due_date, waiting: a.status === 'waiting', notes: a.notes,
           ...(g.team_id ? { assignee: whoHas(a, goals, team, me) } : {}),
+          ...(waitsFor(a).length ? { waits_for: waitsFor(a) } : {}),
         })),
         last_progress: g.last_meaningful_progress_at?.slice(0, 10) ?? null,
       };
@@ -412,13 +430,13 @@ async function pins(ctx: Ctx, actions: Action[]) {
 }
 
 async function today(ctx: Ctx) {
-  const { areas, mineGoals: goals, mineActions: actions } = await load(ctx);
+  const { areas, mineGoals: goals, mineActions: actions, actions: all } = await load(ctx);
   const [deps, feedback] = await Promise.all([
     must(ctx.db.from('action_dependencies').select('action_id,depends_on_id')),
     must(ctx.db.from('recommendation_feedback').select('action_id,goal_id,response,created_at').gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString())),
   ]);
   const pinned = await pins(ctx, actions);
-  const recs = recommend({ goals, actions, dependencies: deps as never, feedback: feedback as never, lifeAreas: areas })
+  const recs = recommend({ goals, actions, knownActions: all, dependencies: deps as never, feedback: feedback as never, lifeAreas: areas })
     .filter((r) => r.action?.id !== pinned.first_thing_today?.task_id);
   const first = pinned.first_thing_today ? actions.find((a) => a.id === pinned.first_thing_today!.task_id)! : null;
   return {
@@ -479,16 +497,33 @@ function findTeam(teams: Team[], name: string): Team {
   return t;
 }
 
-/** Who should do a step on a team project, from a name, role, "me" or "none". */
-function assignment(ctx: Ctx, goal: Goal | undefined, who: string, team: TeamData) {
-  if (!goal?.team_id) throw new ToolError('Only steps on a team project can be assigned. Put the project on a team first (update_project with team).');
-  const r = resolveAssignee(who, goal.team_id, ctx.userId, team);
-  if ('error' in r) throw new ToolError(r.error);
-  return r;
+/**
+ * Who should do a step, from a name, role, "me" or "none". Handing a step to a teammate shares its project with
+ * their team automatically (nothing for the person to set up); "me" on a personal project changes nothing.
+ */
+async function assignment(ctx: Ctx, goal: Goal | undefined, who: string, team: TeamData, teams: Team[]) {
+  if (!goal) throw new ToolError('Only steps in a project can go to a teammate. Put the task in a project first (update_task with project).');
+  if (goal.team_id) {
+    const r = resolveAssignee(who, goal.team_id, ctx.userId, team);
+    if ('error' in r) throw new ToolError(r.error);
+    return r;
+  }
+  if (!teams.length) throw new ToolError('They are not on a team yet. Teams are set up in Momentum: Settings, Team.');
+  let error = '';
+  for (const t of teams) {
+    const r = resolveAssignee(who, t.id, ctx.userId, team);
+    if ('error' in r) { error ||= r.error; continue; }
+    if (!r.assignee_id && !r.assigned_role_id) return r;
+    if (r.assignee_id === ctx.userId) return { assignee_id: null, assigned_role_id: null };
+    await must(ctx.db.from('goals').update({ team_id: t.id }).eq('id', goal.id).select('id'));
+    goal.team_id = t.id;
+    return r;
+  }
+  throw new ToolError(error);
 }
 
 async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
-  const { areas, goals, actions, team } = await load(ctx);
+  const { areas, goals, actions, team, teams } = await load(ctx);
   const task = actions.find((a) => a.id === input.id);
   if (!task) throw new ToolError('No open task with that id. Call get_overview for current ids.');
   const p: Record<string, unknown> = {};
@@ -517,11 +552,18 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
   if (input.notes !== undefined) p.notes = input.notes?.trim() || null;
   if (input.assignee !== undefined) {
     const goalId = p.goal_id === undefined ? task.goal_id : (p.goal_id as string | null);
-    Object.assign(p, assignment(ctx, goals.find((g) => g.id === goalId), input.assignee, team));
+    Object.assign(p, await assignment(ctx, goals.find((g) => g.id === goalId), input.assignee, team, teams));
   }
-  if (!Object.keys(p).length && input.position === undefined) throw new ToolError('Nothing to change.');
+  if (!Object.keys(p).length && input.position === undefined && input.waits_for === undefined) throw new ToolError('Nothing to change.');
   if (Object.keys(p).length) await must(ctx.db.from('actions').update(p).eq('id', task.id).select('id'));
-  const changed = Object.keys(p).filter((k) => k !== 'user_edited' && k !== 'assigned_role_id').map((k) => (k === 'assignee_id' ? 'assignee' : k));
+  if (input.waits_for !== undefined) {
+    const known = new Set(actions.map((a) => a.id));
+    const bad = input.waits_for.filter((id) => !known.has(id) || id === task.id);
+    if (bad.length) throw new ToolError(`Unknown or invalid step ids in waits_for: ${bad.join(', ')}. Use open step ids from get_overview.`);
+    await must(ctx.db.from('action_dependencies').delete().eq('action_id', task.id).select('action_id'));
+    if (input.waits_for.length) await must(ctx.db.from('action_dependencies').insert(input.waits_for.map((id) => ({ action_id: task.id, depends_on_id: id }))).select('action_id'));
+  }
+  const changed = [...Object.keys(p).filter((k) => k !== 'user_edited' && k !== 'assigned_role_id').map((k) => (k === 'assignee_id' ? 'assignee' : k)), ...(input.waits_for !== undefined ? ['waits_for'] : [])];
   if (input.position !== undefined) {
     const goalId = (p.goal_id as string | null | undefined) === undefined ? task.goal_id : (p.goal_id as string | null);
     if (!goalId) throw new ToolError('Only tasks in a project have a position. Set project first.');
@@ -627,9 +669,9 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
       if (!added.id) return added;
       const extra: Record<string, unknown> = notes ? { notes } : {};
       if (assignee) {
-        const { goals, team } = await load(ctx);
+        const { goals, team, teams } = await load(ctx);
         const row = await must(ctx.db.from('actions').select('goal_id').eq('id', added.id).single()) as { goal_id: string | null };
-        Object.assign(extra, assignment(ctx, goals.find((g) => g.id === row.goal_id), assignee, team));
+        Object.assign(extra, await assignment(ctx, goals.find((g) => g.id === row.goal_id), assignee, team, teams));
       }
       if (Object.keys(extra).length) await must(ctx.db.from('actions').update(extra).eq('id', added.id).select('id'));
       return { ...added, ...(notes ? { notes } : {}), ...(assignee ? { assignee } : {}) };
@@ -646,7 +688,7 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
       const assigned = await Promise.all(steps.map(async (st, i) => {
         const who = extra.steps?.[i]?.assignee;
         if (!who) return { id: st.id, title: st.title, assignee: null };
-        await must(ctx.db.from('actions').update(assignment(ctx, goal, who, loaded!.team)).eq('id', st.id).select('id'));
+        await must(ctx.db.from('actions').update(await assignment(ctx, goal, who, loaded!.team, loaded!.teams)).eq('id', st.id).select('id'));
         return { id: st.id, title: st.title, assignee: who };
       }));
       return { ...created, team: teamRow.name, steps: assigned };

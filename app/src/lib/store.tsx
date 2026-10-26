@@ -519,11 +519,24 @@ function useStoreValue() {
 
   const updateAction = useCallback(async (id: string, p: Partial<Action>) => {
     const edited = p.title !== undefined || p.estimated_minutes !== undefined ? { user_edited: true } : {};
-    patch((s) => ({ ...s, actions: s.actions.map((a) => (a.id === id ? { ...a, ...p, ...edited } : a)) }));
+    // Handing a step to a teammate (or a role) shares its project with the team, so they can see and finish it.
+    // Nothing to set up by hand: the project quietly becomes shared the first time.
+    const goalId = p.goal_id !== undefined ? p.goal_id : data.actions.find((a) => a.id === id)?.goal_id;
+    const goal = goalId ? data.goals.find((g) => g.id === goalId) : null;
+    const handOff = (p.assignee_id && p.assignee_id !== session?.user.id) || p.assigned_role_id;
+    const team = handOff && goal && !goal.team_id
+      ? data.teams.find((t) => data.teamMembers.some((m) => m.team_id === t.id && m.user_id === p.assignee_id) || data.teamRoles.some((r) => r.team_id === t.id && r.id === p.assigned_role_id)) ?? data.teams[0]
+      : null;
+    patch((s) => ({
+      ...s,
+      goals: team ? s.goals.map((g) => (g.id === goal!.id ? { ...g, team_id: team.id } : g)) : s.goals,
+      actions: s.actions.map((a) => (a.id === id ? { ...a, ...p, ...edited } : a)),
+    }));
     if (DEMO) return;
+    if (team) await check(supabase.from('goals').update({ team_id: team.id }).eq('id', goal!.id));
     await check(supabase.from('actions').update({ ...p, ...edited }).eq('id', id));
     refresh();
-  }, [patch, refresh]);
+  }, [data.actions, data.goals, data.teams, data.teamMembers, data.teamRoles, session, patch, refresh]);
 
   const createGoal = useCallback(async (g: Partial<Goal> & { title: string }) => {
     if (DEMO) {

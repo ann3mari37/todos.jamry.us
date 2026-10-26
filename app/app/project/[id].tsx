@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
 import { ProjectBanner } from '../../src/components/FlowerArt';
-import { AssignChips, TEAMS_UI } from '../../src/components/TeamBits';
+import { AssignChips } from '../../src/components/TeamBits';
 import { assigneeLabel } from '../../src/core/team';
 import { Banner, Body, Button, Card, Chip, Divider, Field, H1, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, shortDate, timeOfDay } from '../../src/core/dates';
@@ -242,9 +242,9 @@ export default function Project() {
             <Divider />
             <Row icon="tag" title="Life area" value={area?.name ?? 'None'} right={area ? <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: area.color }} /> : null} onPress={() => setSheet('area')} />
             <Divider />
-            {(goal.team_id || (TEAMS_UI && store.teams.length > 0)) && (
+            {goal.team_id && (
               <>
-                <Row icon="users" title="Team" value={store.teams.find((t) => t.id === goal.team_id)?.name ?? 'Just me'} onPress={canShare ? () => setSheet('team') : undefined} />
+                <Row icon="users" title="Shared with" value={store.teams.find((t) => t.id === goal.team_id)?.name ?? 'Just you'} onPress={canShare ? () => setSheet('team') : undefined} />
                 <Divider />
               </>
             )}
@@ -299,9 +299,9 @@ export default function Project() {
           {store.lifeAreas.filter((a) => !a.archived_at).map((a) => <Chip key={a.id} label={a.name} selected={goal.life_area_id === a.id} onPress={() => { update({ life_area_id: a.id }); setSheet(null); }} />)}
         </View>
       </Sheet>
-      <Sheet visible={sheet === 'team'} onClose={() => setSheet(null)} title="Who works on this project?">
-        <Muted style={{ marginBottom: 10 }}>On a team, everyone on it sees this project and its steps, and each step can go to a person or a role. Your life areas and history stay private.</Muted>
-        <SheetOption icon={!goal.team_id ? 'check-circle' : 'circle'} label="Just me" onPress={() => { update({ team_id: null }); setSheet(null); }} />
+      <Sheet visible={sheet === 'team'} onClose={() => setSheet(null)} title="Shared with">
+        <Muted style={{ marginBottom: 10 }}>This project was shared when one of its steps went to a teammate, so they can see and finish their part. Your life areas and history stay private.</Muted>
+        <SheetOption icon={!goal.team_id ? 'check-circle' : 'circle'} label="Stop sharing (just you)" onPress={() => { update({ team_id: null }); setSheet(null); }} />
         {store.teams.map((t) => <SheetOption key={t.id} icon={goal.team_id === t.id ? 'check-circle' : 'circle'} label={t.name} onPress={() => { update({ team_id: t.id }); setSheet(null); }} />)}
       </Sheet>
       <Sheet visible={sheet === 'status'} onClose={() => setSheet(null)} title="Status">
@@ -378,7 +378,7 @@ function EditActionSheet({ action, onClose, siblings }: { action: Action | null;
   const [mins, setMins] = useState('');
   useEffect(() => { if (action) { setTitle(action.title); setMins(action.estimated_minutes ? String(action.estimated_minutes) : ''); } }, [action]);
   if (!action) return null;
-  const teamId = store.goals.find((g) => g.id === action.goal_id)?.team_id ?? null;
+  const teamId = store.goals.find((g) => g.id === action.goal_id)?.team_id ?? store.teams[0]?.id ?? null;
   const deps = store.dependencies.filter((d) => d.action_id === action.id).map((d) => d.depends_on_id);
   const toggleDep = async (other: Action) => {
     if (deps.includes(other.id)) await supabase.from('action_dependencies').delete().eq('action_id', action.id).eq('depends_on_id', other.id);

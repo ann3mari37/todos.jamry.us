@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assigneeLabel, isMine, resolveAssignee, type TeamData } from '../team';
+import { assigneeLabel, isMine, resolveAssignee, teamUpdates, type TeamData } from '../team';
 
 const team: TeamData = {
   members: [
@@ -66,5 +66,27 @@ describe('assigneeLabel', () => {
     expect(assigneeLabel({ assignee_id: 'anne' }, team, 'anne')).toBe('You');
     expect(assigneeLabel({ assigned_role_id: 'coach' }, team)).toBe('Coach · open');
     expect(assigneeLabel({}, team)).toBeNull();
+  });
+});
+
+describe('teamUpdates', () => {
+  const now = new Date('2026-10-26T12:00:00Z');
+  const shared = [{ id: 'team-goal', title: 'Build the review system', team_id: 't1', user_id: 'malinda' }];
+  const step = (p: Record<string, unknown>) => ({ id: String(p.id), goal_id: 'team-goal', user_id: 'malinda', title: String(p.id), status: 'ready', completed_at: null, completed_by: null, ...p }) as never;
+  it('lists teammates finishing their steps, and your step it unblocked', () => {
+    const form = step({ id: 'form', assignee_id: 'anne', status: 'completed', completed_by: 'anne', completed_at: '2026-10-26T09:00:00Z' });
+    const questions = step({ id: 'questions', assignee_id: 'malinda' });
+    const u = teamUpdates({ all: [form, questions], goals: shared, dependencies: [{ action_id: 'questions', depends_on_id: 'form' }], me: 'malinda', team, now });
+    expect(u.finished.map((f) => `${f.by}: ${f.action.title}`)).toEqual(['AnneMarie: form']);
+    expect(u.unblocked.map((a) => a.id)).toEqual(['questions']);
+    expect(u.waiting).toEqual([]);
+  });
+  it('says who you are still waiting on, and skips your own finishes', () => {
+    const form = step({ id: 'form', assigned_role_id: 'dev' });
+    const mineDone = step({ id: 'gift', assignee_id: 'malinda', status: 'completed', completed_by: 'malinda', completed_at: '2026-10-26T09:00:00Z' });
+    const questions = step({ id: 'questions', assignee_id: 'malinda' });
+    const u = teamUpdates({ all: [form, mineDone, questions], goals: shared, dependencies: [{ action_id: 'questions', depends_on_id: 'form' }], me: 'malinda', team, now });
+    expect(u.finished).toEqual([]);
+    expect(u.waiting.map((w) => `${w.action.id} ← ${w.who}`)).toEqual(['questions ← Developer · open']);
   });
 });

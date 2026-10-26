@@ -48,7 +48,7 @@ const ACTIONS: Action[] = [
   act('Identify missing information', 'g-doc', 'ready', 10), act('Gather missing information', 'g-doc', 'ready', 15), act('Make final edits', 'g-doc', 'ready', 15), act('Submit online', 'g-doc', 'ready', 10),
   act('Compare two quotes', 'g-ins', 'completed', 20), act('Call the insurance company', 'g-ins', 'ready', 15), act('Pay the renewal', 'g-ins', 'ready', 10),
   act('Clear one shelf', 'g-garage', 'completed', 15), act('Donate the old bike', 'g-garage', 'ready', 20), act('Sort the paint cans', 'g-garage', 'ready', 15),
-  act('Pick a theme', 'g-web', 'completed', 30), act('Write the About page', 'g-web', 'completed', 30), act('Collect photos', 'g-web', 'completed', 20), act('Set up domain', 'g-web', 'completed', 15),
+  act('Pick a theme', 'g-web', 'completed', 30), act('Write the About page', 'g-web', 'completed', 30), act('Collect photos', 'g-web', 'completed', 20), act('Set up domain', 'g-web', 'completed', 15, { completed_by: 'u-dev' }),
   act('Write the headline', 'g-web', 'ready', 20), act('Proofread pages', 'g-web', 'ready', 30, { assignee_id: 'u-dev' }), act('Connect the contact form', 'g-web', 'ready', 60, { assigned_role_id: 'r-dev' }),
   act('Choose dates', 'g-trip', 'completed', 10), act('Look at flights', 'g-trip', 'ready', 20),
   // Loose tasks for the organizer to file:

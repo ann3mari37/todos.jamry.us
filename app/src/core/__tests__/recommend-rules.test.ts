@@ -183,3 +183,16 @@ describe('mockup-style mix', () => {
     expect(recs[3].reason).toBe('On your list for 6 days. A small step would move it along.');
   });
 });
+
+describe('Waiting on a teammate', () => {
+  it('holds a step back until the teammate step it waits on is done, then offers it', () => {
+    const theirs = action({ title: 'Build the review form' });
+    const mine = action({ title: 'Load the review questions', due_date: '2026-10-21', deadline_type: 'hard' });
+    const deps = [{ action_id: mine.id, depends_on_id: theirs.id }];
+    // Only my own tasks feed my suggestions; the teammate's step is only known for the dependency check.
+    const before = recommend({ goals: [], actions: [mine], knownActions: [mine, theirs], dependencies: deps, now: NOW });
+    expect(before.some((r) => r.action?.id === mine.id)).toBe(false);
+    const after = recommend({ goals: [], actions: [mine], knownActions: [mine, { ...theirs, status: 'completed' }], dependencies: deps, now: NOW });
+    expect(after.some((r) => r.action?.id === mine.id)).toBe(true);
+  });
+});

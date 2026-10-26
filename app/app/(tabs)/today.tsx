@@ -11,6 +11,7 @@ import { FlowerArt } from '../../src/components/FlowerArt';
 import { EditTask } from '../../src/components/EditTask';
 import { OrganizeSheet } from '../../src/components/OrganizeSheet';
 import { TaskList, useOpenTasks } from '../../src/components/TaskList';
+import { TeamUpdatesCard } from '../../src/components/TeamBits';
 import { Ring } from '../../src/components/Ring';
 import { Banner, Body, Button, Card, Chip, H1, Icon, IconButton, IconCircle, Label, Muted, Pill, ProgressBar, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, greeting, startOfDay, startOfWeek, timeOfDay, toISODate } from '../../src/core/dates';
@@ -198,6 +199,7 @@ export default function Today() {
 
           {/* The inbox shows up as one task ("Answer 2 emails"); the briefing itself lives in the Inbox. */}
           {store.emailAccounts.length > 0 && <InboxTaskCard onPress={() => router.push('/inbox')} />}
+          <TeamUpdatesCard />
 
           {loose.length >= 3 && (
             <Pressable onPress={() => setOrganizing(true)} accessibilityRole="button" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.pinkWash, marginBottom: 12, alignSelf: 'flex-start' }, pressed && { opacity: 0.7 }]}>

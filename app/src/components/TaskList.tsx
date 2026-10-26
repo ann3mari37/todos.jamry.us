@@ -85,6 +85,8 @@ export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { 
 
   const live = open ? store.allActions.find((a) => a.id === open.id) ?? open : null;
   const openGoal = live?.goal_id ? store.goals.find((g) => g.id === live.goal_id) : null;
+  // Any step in a project can go to a teammate; its project is shared the first time one does.
+  const assignTeam = openGoal ? openGoal.team_id ?? store.teams[0]?.id ?? null : null;
   const openArea = live ? store.lifeAreas.find((x) => x.id === (live.life_area_id ?? openGoal?.life_area_id)) : null;
   const why = live ? suggestWhy(live.title, { areaName: openArea?.name, minutes: live.estimated_minutes, due: live.due_date ? { date: live.due_date, type: live.deadline_type ?? 'target' } : null }) : null;
   const projectLike = !!live && !live.goal_id && looksLikeProject(live.title);
@@ -149,7 +151,7 @@ export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { 
             {!live.goal_id && <SheetOption icon="folder-plus" label={projectLike ? 'Turn into a project (it has several steps)' : 'Make this a project'} onPress={() => makeProject(live)} />}
             <SheetOption icon="calendar" label={live.due_date ? `Due date: ${friendlyDate(live.due_date)}` : 'Set a due date'} onPress={() => setPanel('due')} />
             {!live.goal_id && <SheetOption icon="grid" label={`Life area: ${store.lifeAreas.find((x) => x.id === live.life_area_id)?.name ?? 'none'}`} onPress={() => setPanel('area')} />}
-            {openGoal?.team_id && <SheetOption icon="user-check" label={`Who's doing it: ${who(live) ?? 'Unassigned'}`} onPress={() => setPanel('assign')} />}
+            {assignTeam && <SheetOption icon="user-check" label={`Who's doing it: ${who(live) ?? 'You'}`} onPress={() => setPanel('assign')} />}
             {openGoal && <SheetOption icon="folder" label={`Open project: ${openGoal.title}`} onPress={() => { close(); router.push({ pathname: '/project/[id]', params: { id: openGoal.id } }); }} />}
             {live.status !== 'waiting'
               ? <SheetOption icon="clock" label="I'm waiting on something" onPress={() => { store.updateAction(live.id, { status: 'waiting' }); close(); }} />
@@ -168,8 +170,8 @@ export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { 
             </View>
           </>
         )}
-        {live && panel === 'assign' && openGoal?.team_id && (
-          <AssignChips teamId={openGoal.team_id} value={{ assignee_id: live.assignee_id ?? null, assigned_role_id: live.assigned_role_id ?? null }}
+        {live && panel === 'assign' && assignTeam && (
+          <AssignChips teamId={assignTeam} value={{ assignee_id: live.assignee_id ?? null, assigned_role_id: live.assigned_role_id ?? null }}
             onChange={(v) => { store.updateAction(live.id, v); close(); }} />
         )}
         {live && panel === 'due' && (

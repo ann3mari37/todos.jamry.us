@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Platform, View } from 'react-native';
 import { CopyBox } from '../src/components/ConnectChat';
 import { inviteLink } from '../src/components/TeamBits';
@@ -63,7 +63,7 @@ export default function TeamScreen() {
         </View>
       )}
       <Muted style={{ marginBottom: 12 }}>
-        Everyone here sees the team’s projects and their steps. Each step goes to a person, or to a role until someone takes it. Life areas, history and email stay private.
+        Give any step to a teammate or a role and its project is shared with the team automatically. Everyone’s Today shows only their own steps, and you’ll see when teammates finish theirs. Life areas, history and email stay private.
       </Muted>
       {error && <Banner tone="soft" text={error} />}
 
@@ -106,9 +106,9 @@ export default function TeamScreen() {
         })}
       </Card>
 
-      <H2 style={{ marginTop: 20, marginBottom: 8 }}>Team projects</H2>
+      <H2 style={{ marginTop: 20, marginBottom: 8 }}>Shared projects</H2>
       <Card style={{ paddingVertical: 4 }}>
-        {projects.length === 0 && <Muted style={{ padding: 12 }}>None yet. Open a project and set its Team to share it.</Muted>}
+        {projects.length === 0 && <Muted style={{ padding: 12 }}>None yet. Give a step to a teammate (in the step’s options, or ask your AI chat) and its project is shared automatically.</Muted>}
         {projects.map((g, i) => (
           <View key={g.id}>
             {i > 0 && <Divider />}
@@ -200,8 +200,8 @@ function MemberSheet({ member, admin, roles, held, me, onClose, onSave, onRemove
 
 function RoleSheet({ role, onClose, onSave, onDelete }: { role: Partial<TeamRole> | null; onClose: () => void; onSave: (r: Partial<TeamRole>) => void; onDelete: (r: Partial<TeamRole>) => void }) {
   const [d, setD] = useState<Partial<TeamRole> | null>(null);
-  if (role && d?.id !== role.id && !(d && !role.id && !d.id)) setD(role);
-  if (!role && d) setD(null);
+  // A fresh copy each time the sheet opens (a new role has no id to compare, so key on the object itself).
+  useEffect(() => { setD(role); }, [role]);
   if (!role || !d) return <Sheet visible={false} onClose={onClose}>{null}</Sheet>;
   return (
     <Sheet visible onClose={onClose} title={role.id ? 'Edit role' : 'New role'}>

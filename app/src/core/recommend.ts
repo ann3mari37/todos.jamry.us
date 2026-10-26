@@ -19,6 +19,8 @@ export interface RecommendInput {
   goals: Goal[];
   actions: Action[];
   dependencies?: Dependency[];
+  /** Every visible task (teammates' steps on shared projects too), for checking what a step waits on. Defaults to actions. */
+  knownActions?: Action[];
   feedback?: FeedbackEntry[];
   now?: Date;
   mode?: DailyMode | null;
@@ -64,7 +66,7 @@ export function goalProgress(goalId: string, actions: Action[]): { done: number;
 /** Actions whose dependencies are all completed and whose own status is actionable. */
 export function readyActions(input: RecommendInput): Action[] {
   const now = input.now ?? new Date();
-  const byId = new Map(input.actions.map((a) => [a.id, a]));
+  const byId = new Map((input.knownActions ?? input.actions).map((a) => [a.id, a]));
   const goalById = new Map(input.goals.map((g) => [g.id, g]));
   const deps = input.dependencies ?? [];
   const exclude = new Set(input.excludeActionIds ?? []);

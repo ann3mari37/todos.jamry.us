@@ -37,7 +37,8 @@ export function EditTask({ action, onClose }: { action: Action | null; onClose: 
     setDateText(date ?? '');
     set(date ? { due_date: date, deadline_type: type ?? (d.deadline_type === 'hard' ? 'hard' : 'target') } : { due_date: null, deadline_type: 'none' });
   };
-  const teamId = store.goals.find((g) => g.id === d.goal_id)?.team_id ?? null;
+  // Steps in a project can go to a teammate (the project is shared with the team the first time).
+  const teamId = d.goal_id ? store.goals.find((g) => g.id === d.goal_id)?.team_id ?? store.teams[0]?.id ?? null : null;
   const projects = store.goals.filter((g) => ['active', 'waiting', 'blocked', 'paused'].includes(g.status));
   const areas = store.lifeAreas.filter((a) => !a.archived_at);
   const validTyped = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
