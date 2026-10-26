@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import { handoffToDrafts, draftsToCommit, HandoffItem, type HandoffInterpretation } from '../../app/src/core/handoff';
 import { recommend, KIND_LABEL } from '../../app/src/core/recommend';
+import { composeNotes, readyToHandOff, titleProblem } from '../../app/src/core/clarity';
 import { assigneeLabel, isMine, resolveAssignee, teamUpdates, type TeamData } from '../../app/src/core/team';
 import type { Action, Goal, LifeArea, Team, TeamMember, TeamMemberRole, TeamRole } from '../../app/src/core/types';
 import { crunch, projectHealth, staleTasks } from '../../app/src/core/workload';
@@ -22,6 +23,16 @@ const LIVE_GOALS: Goal['status'][] = ['active', 'waiting', 'blocked', 'paused', 
 // Other people read what a chat adds without the chat: these are required, and the errors say what to include.
 const SUMMARY_RULE = 'summary is required: 2–4 sentences for the people who open this in Momentum (what it is, why, where it stands)';
 const NOTES_RULE = 'notes are required: the details someone needs to do it without this chat';
+const BRIEF_RULE = 'each task needs how (what exactly to do) and done_when (what finished looks like), written for someone who was not in this chat';
+
+/** The person's name as teammates know it (for "From …" on handoffs). */
+async function myName(ctx: Ctx): Promise<string | null> {
+  const { data: m } = await ctx.db.from('team_members').select('display_name').eq('user_id', ctx.userId).limit(1);
+  const name = (m as { display_name: string }[] | null)?.[0]?.display_name;
+  if (name) return name;
+  const { data: prof } = await ctx.db.from('profiles').select('display_name').maybeSingle();
+  return (prof as { display_name?: string | null } | null)?.display_name ?? null;
+}
 
 export const MCP_CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -153,7 +164,15 @@ const TOOLS = [
     name: 'add_task',
     title: 'Add a task now',
     description: 'Adds one task straight to their list, without review. Use only when they clearly ask to add something specific ("add call the dentist tomorrow"); for plans use send_plan. A task added to a project goes after its existing steps. Give minutes when you know the size of the work; otherwise leave it out rather than guess.',
-    inputSchema: { type: 'object', required: ['title', 'notes'], properties: { ...taskProps, notes: { type: 'string', minLength: 10, maxLength: 4000, description: "Required. The details someone needs to do it without this chat: what exactly to do, links, who to ask, what done looks like." }, assignee: { type: 'string', maxLength: 80, description: 'Who does it: a teammate’s name or a role name (giving it to someone else shares the project with them automatically), "me", or "none". See teams in get_overview.' } } },
+    inputSchema: { type: 'object', required: ['title', 'context', 'how', 'done_when'], properties: { ...taskProps, title: { ...taskProps.title, description: "Clear on its own to someone who was not in this chat: start with a verb and name the specific thing (and who it is for or from). Vague titles (\"Follow up\", \"Fix it\", \"Send this\") are rejected." }, ...{
+          context: { type: 'string', minLength: 15, maxLength: 1500, description: 'Why this exists and the background someone needs who was not in this chat' },
+          how: { type: 'string', minLength: 15, maxLength: 2000, description: 'What exactly to do, specific enough to start without asking' },
+          done_when: { type: 'string', minLength: 10, maxLength: 600, description: 'What finished looks like, so they know when to check it off' },
+          links: { type: 'string', maxLength: 1000, description: 'Links, files, logins to ask for, where things live' },
+          ask: { type: 'string', maxLength: 200, description: 'Who to ask with questions' },
+        },
+      notes: { type: 'string', maxLength: 2000, description: 'Anything else worth knowing' },
+      assignee: { type: 'string', maxLength: 80, description: 'Who does it: a teammate’s name or a role name (giving it to someone else shares the project with them automatically), "me", or "none". See teams in get_overview.' } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
@@ -167,8 +186,14 @@ const TOOLS = [
         summary: { type: 'string', minLength: 20, maxLength: 1500, description: "Required. 2–4 sentences for whoever opens this project in Momentum (they were not in this chat): what it is, why it matters, where things stand, and any decisions or constraints." },
         why: taskProps.why, due_date: taskProps.due_date, hard_deadline: taskProps.hard_deadline, area: taskProps.area,
         team: { type: 'string', maxLength: 80, description: 'Put the project on this team (its name from get_overview) so every member sees it' },
-        steps: { ...taskProps.steps, minItems: 1, items: { ...taskProps.steps.items, required: ['title', 'notes'], properties: { ...taskProps.steps.items.properties,
-          notes: { type: 'string', minLength: 10, maxLength: 4000, description: "Required. The details someone needs to do it without this chat: what exactly to do, links, who to ask, what done looks like." },
+        steps: { ...taskProps.steps, minItems: 1, items: { ...taskProps.steps.items, required: ['title', 'how', 'done_when'], properties: { ...taskProps.steps.items.properties,
+          title: { type: 'string', maxLength: 200, description: "Clear on its own to someone who was not in this chat: start with a verb and name the specific thing (and who it is for or from). Vague titles (\"Follow up\", \"Fix it\", \"Send this\") are rejected." }, ...{
+          context: { type: 'string', minLength: 15, maxLength: 1500, description: 'Optional: background for this step beyond the project summary' },
+          how: { type: 'string', minLength: 15, maxLength: 2000, description: 'What exactly to do, specific enough to start without asking' },
+          done_when: { type: 'string', minLength: 10, maxLength: 600, description: 'What finished looks like, so they know when to check it off' },
+          links: { type: 'string', maxLength: 1000, description: 'Links, files, logins to ask for, where things live' },
+          ask: { type: 'string', maxLength: 200, description: 'Who to ask with questions' },
+        },
           assignee: { type: 'string', maxLength: 80, description: 'A teammate or role for this step (shares the project with them)' } } } },
       },
     },
@@ -299,7 +324,7 @@ const INSTRUCTIONS = [
   'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
   'Email: for "what is in my email" or "what should I answer first", call get_inbox, read the threads that matter with read_email_thread, then save_email_briefing with a cohesive paragraph and a ranked do_first list, and tell them the same. Offer send_plan (with from_email) to turn emails into tasks. Archive or label only when asked.',
   'Teams: if get_overview lists teams, keep it light; they do not want to organize team projects. Leave their own steps alone and only set assignee on steps someone else should do: the person when it is clearly theirs, otherwise the role whose description fits (open to anyone holding it). That shares the project with the team automatically. When one of their steps cannot start until a teammate finishes something, set waits_for on it; it stays off their Today until then, and team_updates tells them when it is their turn. Use the exact names from teams; never invent people or roles, and if a role is missing, tell them to add it under Settings, Team.',
-  'Others read what you add without this chat (teammates, and the person on another day), so leave a trail: every project needs a summary (what it is, why, where it stands, decisions) and every task or step you add needs notes (what exactly to do, links, who to ask, what done looks like). Momentum rejects adds without them. Before handing a step to someone else, make sure its notes would let them do it alone. When plans change, update the summary (update_project summary) and add decisions as project notes (add_note).',
+  'Write for asynchronous work: whoever picks up a task may never see this chat (a teammate, or them on another day). Titles must stand on their own: a verb plus the specific thing and who it is for or from ("Send Malinda the draft review-request email for approval", never "Follow up" or "Fix it"). Every task you add needs context (why it exists), how (what exactly to do) and done_when (what finished looks like), plus links and who to ask when you know them; Momentum lays these out in the task’s notes with who it is from. When you plan work for several people, write each person’s steps so they make sense without the others’ conversation. Others read what you add without this chat, so leave a trail: every project needs a summary (what it is, why, where it stands, decisions) and every task or step you add needs notes (what exactly to do, links, who to ask, what done looks like). Momentum rejects adds without them. Before handing a step to someone else, make sure its notes would let them do it alone. When plans change, update the summary (update_project summary) and add decisions as project notes (add_note).',
   'Parking: when something needs thinking through but is not ready to become steps (or they say "not now", "someday", "park it"), use park_project with what you know as notes, any rough steps, and when to revisit (a date and/or a condition). Do not unpack it unasked. When planning, look at parked in get_overview: bring up ideas that are ready_to_revisit, or whose revisit_when or notes fit what they are working on now, and offer to work them out. Add what you learn with update_project add_note. When they are ready, unpack with update_project status "active" and add the real steps.',
   'Keep their lists true to the plan: when you learn a step’s real size, a date moving, or a better order, fix it with update_task (minutes, due_date, position, notes) or update_project (due_date, add_note). Put specifics (links, who to call, decisions) in a task’s notes, its details section, and tell them what you changed. Steps you add later go to the end of their project, so set position when they belong earlier.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
@@ -513,6 +538,8 @@ async function today(ctx: Ctx) {
 }
 
 async function sendPlan(ctx: Ctx, input: z.infer<typeof PlanInput>, client: string | null) {
+  const unclear = input.items.flatMap((i) => [i.title, ...(i.steps ?? []).map((st) => st.title)]).map(titleProblem).find(Boolean);
+  if (unclear) throw new ToolError(`Not sent: ${unclear}`);
   const { areas, goals } = await load(ctx);
   const items = handoffToDrafts(input.items, areas, goals.filter((g) => g.status !== 'paused' && g.status !== 'parked'));
   const interpretation: HandoffInterpretation = { version: 1, summary: input.summary, client, items };
@@ -587,7 +614,11 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
   const task = actions.find((a) => a.id === input.id);
   if (!task) throw new ToolError('No open task with that id. Call get_overview for current ids.');
   const p: Record<string, unknown> = {};
-  if (input.title) Object.assign(p, { title: input.title, user_edited: true });
+  if (input.title) {
+    const vague = titleProblem(input.title);
+    if (vague) throw new ToolError(`Not renamed: ${vague}`);
+    Object.assign(p, { title: input.title, user_edited: true });
+  }
   if (input.area !== undefined) {
     const n = input.area.toLowerCase();
     const area = areas.find((a) => a.name.toLowerCase() === n) ?? areas.find((a) => a.name.toLowerCase().startsWith(n));
@@ -615,7 +646,10 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
     const who = await assignment(ctx, goals.find((g) => g.id === goalId), input.assignee, team, teams);
     // Someone else will pick this up without the chat: they need the details.
     const handOff = (who.assignee_id && who.assignee_id !== ctx.userId) || who.assigned_role_id;
-    if (handOff && !(p.notes ?? task.notes)) throw new ToolError(`Not assigned: this step has no notes. Add notes (${NOTES_RULE}) in the same call.`);
+    if (handOff && !readyToHandOff((p.notes as string | null | undefined) ?? task.notes)) {
+      throw new ToolError('Not assigned: they will pick this up without this chat, so its notes must say what to do and include a "Done when:" line. Rewrite notes (Context / What to do / Done when / Questions) in the same call.');
+    }
+    if (handOff && titleProblem(String(p.title ?? task.title))) throw new ToolError(`Not assigned: ${titleProblem(String(p.title ?? task.title))}`);
     Object.assign(p, who);
   }
   if (!Object.keys(p).length && input.position === undefined && input.waits_for === undefined) throw new ToolError('Nothing to change.');
@@ -767,26 +801,51 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
     case 'get_today': return today(ctx);
     case 'send_plan': return sendPlan(ctx, parse(PlanInput, args), client);
     case 'add_task': {
-      const { notes, assignee } = parse(z.object({ notes: z.string({ required_error: NOTES_RULE }).trim().min(10, NOTES_RULE).max(4000), assignee: z.string().trim().max(80).optional() }), args);
+      const brief = parse(z.object({
+        title: z.string().trim().min(1).max(200),
+        context: z.string().trim().max(1500).optional(),
+        how: z.string({ required_error: BRIEF_RULE }).trim().min(15, BRIEF_RULE).max(2000),
+        done_when: z.string({ required_error: BRIEF_RULE }).trim().min(10, BRIEF_RULE).max(600),
+        links: z.string().trim().max(1000).optional(),
+        ask: z.string().trim().max(200).optional(),
+        notes: z.string().trim().max(2000).optional(),
+        assignee: z.string().trim().max(80).optional(),
+      }).extend({ context: z.string({ required_error: BRIEF_RULE }).trim().min(15, BRIEF_RULE).max(1500) }), args);
+      const vague = titleProblem(brief.title);
+      if (vague) throw new ToolError(`Not added: ${vague}`);
+      const assignee = brief.assignee;
       const added = await addNow(ctx, { ...parse(HandoffItem.omit({ kind: true }), args), kind: 'task' });
       if (!added.id) return added;
-      const extra: Record<string, unknown> = notes ? { notes } : {};
+      const notes = composeNotes(brief, { by: await myName(ctx), project: added.project });
+      const extra: Record<string, unknown> = { notes };
       if (assignee) {
         const { goals, team, teams } = await load(ctx);
         const row = await must(ctx.db.from('actions').select('goal_id').eq('id', added.id).single()) as { goal_id: string | null };
         Object.assign(extra, await assignment(ctx, goals.find((g) => g.id === row.goal_id), assignee, team, teams));
       }
       if (Object.keys(extra).length) await must(ctx.db.from('actions').update(extra).eq('id', added.id).select('id'));
-      return { ...added, ...(notes ? { notes } : {}), ...(assignee ? { assignee } : {}) };
+      return { ...added, notes, ...(assignee ? { assignee } : {}) };
     }
     case 'create_project': {
       const extra = parse(z.object({
         summary: z.string({ required_error: SUMMARY_RULE }).trim().min(20, SUMMARY_RULE).max(1500),
         team: z.string().trim().min(1).max(80).optional(),
-        steps: z.array(z.object({ notes: z.string({ required_error: `each step's ${NOTES_RULE}` }).trim().min(10, `each step's ${NOTES_RULE}`).max(4000), assignee: z.string().trim().max(80).optional() }).passthrough(), { required_error: 'steps are required, each with notes' }).min(1),
+        steps: z.array(z.object({
+        title: z.string().trim().min(1).max(200),
+        context: z.string().trim().max(1500).optional(),
+        how: z.string({ required_error: BRIEF_RULE }).trim().min(15, BRIEF_RULE).max(2000),
+        done_when: z.string({ required_error: BRIEF_RULE }).trim().min(10, BRIEF_RULE).max(600),
+        links: z.string().trim().max(1000).optional(),
+        ask: z.string().trim().max(200).optional(),
+        notes: z.string().trim().max(2000).optional(),
+        assignee: z.string().trim().max(80).optional(),
+      }), { required_error: 'steps are required, each with how and done_when' }).min(1),
       }), args);
+      const unclear = [String((args as { title?: unknown }).title ?? ''), ...extra.steps.map((st) => st.title)].map(titleProblem).find(Boolean);
+      if (unclear) throw new ToolError(`Not created: ${unclear}`);
       const loaded = await load(ctx);
       const teamRow = extra.team ? findTeam(loaded.teams, extra.team) : null;
+      const by = await myName(ctx);
       const created = await addNow(ctx, { ...parse(HandoffItem.omit({ kind: true, project: true, minutes: true }), args), kind: 'project' });
       if (!created.id) return created;
       await must(ctx.db.from('goals').update({ description: extra.summary, ...(teamRow ? { team_id: teamRow.id } : {}) }).eq('id', created.id).select('id'));
@@ -796,9 +855,10 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
       for (const [i, st] of steps.entries()) {
         const given = extra.steps[i];
         const who = given?.assignee;
-        const p = { ...(given?.notes ? { notes: given.notes } : {}), ...(who ? await assignment(ctx, goal, who, loaded.team, loaded.teams) : {}) };
+        const notes = given ? composeNotes(given, { by, project: created.title }) : null;
+        const p = { ...(notes ? { notes } : {}), ...(who ? await assignment(ctx, goal, who, loaded.team, loaded.teams) : {}) };
         if (Object.keys(p).length) await must(ctx.db.from('actions').update(p).eq('id', st.id).select('id'));
-        saved.push({ id: st.id, title: st.title, notes: given?.notes ?? null, assignee: who ?? null });
+        saved.push({ id: st.id, title: st.title, notes, assignee: who ?? null });
       }
       return { ...created, summary: extra.summary, ...(teamRow || goal.team_id ? { team: teamRow?.name ?? loaded.teams.find((t) => t.id === goal.team_id)?.name } : {}), steps: saved };
     }
