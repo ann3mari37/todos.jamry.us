@@ -58,6 +58,30 @@ export async function authorizationServerMetadata(env: Env, ownSignIn = false): 
 }
 
 /**
+ * The consent page's calls to Supabase (`{ id }` to read a connection request, `{ id, action }` to approve or deny it).
+ * Supabase only accepts them from its Site URL, so they go through here, from that origin, on every site.
+ */
+export async function consentProxy(req: Request, env: Env, siteUrl: string, headers: HeadersInit): Promise<Response> {
+  const { id, action } = await req.json().catch(() => ({})) as { id?: string; action?: string };
+  if (!id || !/^[\w-]+$/.test(id) || (action && action !== 'approve' && action !== 'deny')) {
+    return Response.json({ error: 'bad_request' }, { status: 400, headers });
+  }
+  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/oauth/authorizations/${id}${action ? '/consent' : ''}`, {
+    method: action ? 'POST' : 'GET',
+    headers: {
+      Authorization: req.headers.get('Authorization') ?? '',
+      apikey: env.SUPABASE_ANON_KEY,
+      Origin: siteUrl,
+      ...(action ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: action ? JSON.stringify({ action }) : undefined,
+  });
+  const body = await res.json().catch(() => null) as Record<string, unknown> | null;
+  if (!res.ok || !body) return Response.json({ error: String(body?.msg ?? body?.error_description ?? body?.error ?? 'request_failed') }, { status: res.ok ? 502 : res.status, headers });
+  return Response.json(body, { headers });
+}
+
+/**
  * First step of the chat sign-in on a non-primary site: let Supabase start the authorization (it needs no session for
  * that), then send the browser to this site's consent page instead of the Site URL's.
  */

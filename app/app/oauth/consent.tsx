@@ -4,7 +4,7 @@ import { ActivityIndicator, Platform, View } from 'react-native';
 import { FlowerArt } from '../../src/components/FlowerArt';
 import { Banner, Body, Button, Card, H1, Icon, IconCircle, Muted, Screen } from '../../src/components/ui';
 import { useStore } from '../../src/lib/store';
-import { supabase } from '../../src/lib/supabase';
+import { api, ApiError } from '../../src/lib/api';
 import { colors, fonts } from '../../src/theme';
 
 // Supabase Auth's OAuth server sends people here when an AI chat (Claude, ChatGPT…) asks to connect to Momentum.
@@ -36,24 +36,27 @@ export default function Consent() {
       router.replace({ pathname: '/sign-in', params: { next: `/oauth/consent?authorization_id=${encodeURIComponent(id)}` } });
       return;
     }
-    supabase.auth.oauth.getAuthorizationDetails(id).then(({ data, error: e }) => {
-      if (e || !data) {
-        console.warn('OAuth authorization details failed', e);
-        return setError(`This connection request couldn’t be loaded${e?.message ? ` (${e.message})` : ''}. Start again from your AI app.`);
-      }
-      if (!('authorization_id' in data)) return go(data.redirect_url); // already allowed before
-      setDetails(data as Details);
+    // Through our API rather than supabase-js: Supabase only answers these from its Site URL, and this page also runs
+    // on the dashboard's domain.
+    api<Details & { authorization_id?: string; redirect_url?: string }>('/api/oauth/consent', { id }).then((data) => {
+      if (!data.authorization_id && data.redirect_url) return go(data.redirect_url); // already allowed before
+      setDetails(data);
+    }).catch((e: unknown) => {
+      const why = e instanceof ApiError && e.code !== 'request_failed' ? ` (${e.code})` : '';
+      setError(`This connection request couldn’t be loaded${why}. Start again from your AI app.`);
     });
   }, [authReady, session, id]);
 
   const decide = async (allow: boolean) => {
     if (!id) return;
     setBusy(allow ? 'allow' : 'deny');
-    const res = allow
-      ? await supabase.auth.oauth.approveAuthorization(id, { skipBrowserRedirect: true })
-      : await supabase.auth.oauth.denyAuthorization(id, { skipBrowserRedirect: true });
-    if (res.error || !res.data) { setBusy(null); return setError('Something went wrong. Start again from your AI app.'); }
-    go(res.data.redirect_url);
+    try {
+      const res = await api<{ redirect_url: string }>('/api/oauth/consent', { id, action: allow ? 'approve' : 'deny' });
+      go(res.redirect_url);
+    } catch {
+      setBusy(null);
+      setError('Something went wrong. Start again from your AI app.');
+    }
   };
 
   const app = details?.client.name || 'An AI app';

@@ -5,7 +5,7 @@ import { availableProviders, connectImap, disconnect, finishOAuth, startOAuth } 
 import * as email from './email/service';
 import type { Env } from './env';
 import { enforceLimits, transcribe } from './ai';
-import { authorizationServerMetadata, authorize, handleMcp, MCP_CORS, protectedResourceMetadata } from './mcp';
+import { authorizationServerMetadata, authorize, consentProxy, handleMcp, MCP_CORS, protectedResourceMetadata } from './mcp';
 import * as ops from './ops';
 import * as organize from './organize';
 import { authenticate, HttpError } from './supabase';
@@ -151,6 +151,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const { pathname } = new URL(req.url);
     try {
+      if (pathname === '/api/oauth/consent' && req.method === 'POST') return consentProxy(req, env, baseEnv.APP_URL ?? 'https://todos.jamry.us', headers);
       if (pathname === '/api/health') return json({ ok: true, ai: !!env.ANTHROPIC_API_KEY, voice: !!env.OPENAI_API_KEY, email: availableProviders(env), env: env.ENVIRONMENT ?? 'production' }, 200, headers);
       // OAuth providers redirect the browser here (GET, no bearer token); the signed state identifies the user.
       if (pathname === '/api/email/oauth/callback' && req.method === 'GET') return finishOAuth(env, new URL(req.url));
