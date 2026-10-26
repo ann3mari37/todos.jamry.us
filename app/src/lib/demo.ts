@@ -32,7 +32,7 @@ const GOALS: Goal[] = [
   goal('g-doc', 'Submit the document', 'a-work', { meaning: 'Gets a major obligation off my mind.', meaning_source: 'user', accountability: 'keep_visible' }),
   goal('g-ins', 'Renew insurance', 'a-fin', { deadline: date(7), deadline_type: 'hard' }),
   goal('g-garage', 'Organize the garage', 'a-home', { last_meaningful_progress_at: iso(-16 * D), meaning: 'Room to breathe at home.', meaning_source: 'user' }),
-  goal('g-web', 'Launch website', 'a-work'),
+  goal('g-web', 'Launch website', 'a-work', { team_id: 't-demo', user_id: 'demo-user' }),
   goal('g-trip', 'Plan trip', 'a-rel'),
   goal('g-app', 'Create a project management app for Malinda', 'a-work', { created_at: iso(-H) }), // no steps yet
 ];
@@ -49,7 +49,7 @@ const ACTIONS: Action[] = [
   act('Compare two quotes', 'g-ins', 'completed', 20), act('Call the insurance company', 'g-ins', 'ready', 15), act('Pay the renewal', 'g-ins', 'ready', 10),
   act('Clear one shelf', 'g-garage', 'completed', 15), act('Donate the old bike', 'g-garage', 'ready', 20), act('Sort the paint cans', 'g-garage', 'ready', 15),
   act('Pick a theme', 'g-web', 'completed', 30), act('Write the About page', 'g-web', 'completed', 30), act('Collect photos', 'g-web', 'completed', 20), act('Set up domain', 'g-web', 'completed', 15),
-  act('Write the headline', 'g-web', 'ready', 20), act('Proofread pages', 'g-web', 'ready', 30),
+  act('Write the headline', 'g-web', 'ready', 20), act('Proofread pages', 'g-web', 'ready', 30, { assignee_id: 'u-dev' }), act('Connect the contact form', 'g-web', 'ready', 60, { assigned_role_id: 'r-dev' }),
   act('Choose dates', 'g-trip', 'completed', 10), act('Look at flights', 'g-trip', 'ready', 20),
   // Loose tasks for the organizer to file:
   act('Clear the kitchen counter', null, 'ready', 5, { life_area_id: 'a-home' }),
@@ -142,6 +142,17 @@ export const demo: { current: Snapshot; chatConnections: ChatConnection[] } = {
     organizeRuns: [],
     handoffs: [HANDOFF],
     checkins: [],
+    teams: [{ id: 't-demo', name: 'Malinda Perry Consulting', created_by: 'demo-user', created_at: iso(-20 * D) }],
+    teamMembers: [
+      { team_id: 't-demo', user_id: 'demo-user', display_name: 'You', is_admin: true, joined_at: iso(-20 * D) },
+      { team_id: 't-demo', user_id: 'u-dev', display_name: 'AnneMarie', is_admin: false, joined_at: iso(-19 * D) },
+    ],
+    teamRoles: [
+      { id: 'r-coach', team_id: 't-demo', name: 'Coach', description: 'Works with clients; owns the wording and decisions' },
+      { id: 'r-dev', team_id: 't-demo', name: 'Developer', description: 'Builds and fixes the website and systems' },
+    ],
+    teamMemberRoles: [{ team_id: 't-demo', user_id: 'demo-user', role_id: 'r-coach' }, { team_id: 't-demo', user_id: 'u-dev', role_id: 'r-dev' }],
+    teamInvites: [],
   },
 };
 if (FRESH) {

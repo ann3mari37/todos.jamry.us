@@ -5,10 +5,11 @@ import type { Action, DeadlineType } from '../core/types';
 import { minutesOf } from '../core/workload';
 import { useStore } from '../lib/store';
 import { colors, fonts } from '../theme';
+import { AssignChips } from './TeamBits';
 import { Button, Chip, Field, Muted, Sheet } from './ui';
 
 // Edit anything about a task in one place: name, notes, time, date (and whether it's a real deadline), life area,
-// project, and whether it's ready or waiting on someone. Opened from the task options sheet on Today and To-dos.
+// project, who on the team does it (team projects), and whether it's ready or waiting on someone. Opened from the task options sheet on Today and To-dos.
 
 const MINUTES = [5, 10, 15, 30, 45, 60, 90, 120];
 
@@ -36,6 +37,7 @@ export function EditTask({ action, onClose }: { action: Action | null; onClose: 
     setDateText(date ?? '');
     set(date ? { due_date: date, deadline_type: type ?? (d.deadline_type === 'hard' ? 'hard' : 'target') } : { due_date: null, deadline_type: 'none' });
   };
+  const teamId = store.goals.find((g) => g.id === d.goal_id)?.team_id ?? null;
   const projects = store.goals.filter((g) => ['active', 'waiting', 'blocked', 'paused'].includes(g.status));
   const areas = store.lifeAreas.filter((a) => !a.archived_at);
   const validTyped = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
@@ -43,7 +45,7 @@ export function EditTask({ action, onClose }: { action: Action | null; onClose: 
   const save = async () => {
     if (!action || !d.title.trim()) return;
     const p: Partial<Action> = {};
-    (['title', 'notes', 'estimated_minutes', 'due_date', 'deadline_type', 'life_area_id', 'goal_id', 'status'] as const).forEach((k) => {
+    (['title', 'notes', 'estimated_minutes', 'due_date', 'deadline_type', 'life_area_id', 'goal_id', 'status', 'assignee_id', 'assigned_role_id'] as const).forEach((k) => {
       if (d[k] !== action[k]) (p as Record<string, unknown>)[k] = k === 'title' ? d.title.trim() : k === 'notes' ? (d.notes?.trim() || null) : d[k];
     });
     if (Object.keys(p).length) await store.updateAction(action.id, p);
@@ -81,9 +83,16 @@ export function EditTask({ action, onClose }: { action: Action | null; onClose: 
         <>
           <Section>Project</Section>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Chip label="None" selected={!d.goal_id} onPress={() => set({ goal_id: null })} />
-            {projects.map((g) => <Chip key={g.id} label={g.title} selected={d.goal_id === g.id} onPress={() => set({ goal_id: g.id })} />)}
+            <Chip label="None" selected={!d.goal_id} onPress={() => set({ goal_id: null, assignee_id: null, assigned_role_id: null })} />
+            {projects.map((g) => <Chip key={g.id} label={g.title} selected={d.goal_id === g.id} onPress={() => set({ goal_id: g.id, ...(g.id === d.goal_id ? {} : { assignee_id: null, assigned_role_id: null }) })} />)}
           </View>
+        </>
+      )}
+
+      {teamId && (
+        <>
+          <Section>Who’s doing it?</Section>
+          <AssignChips teamId={teamId} value={{ assignee_id: d.assignee_id ?? null, assigned_role_id: d.assigned_role_id ?? null }} onChange={(v) => set(v)} />
         </>
       )}
 

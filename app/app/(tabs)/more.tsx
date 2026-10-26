@@ -5,6 +5,7 @@ import { Card, Divider, H1, Muted, Row, Screen } from '../../src/components/ui';
 import { useEmailAvailable } from '../../src/components/EmailBits';
 import { SyncStatus } from '../../src/components/SyncStatus';
 import { useStore } from '../../src/lib/store';
+import { TEAMS_UI } from '../../src/components/TeamBits';
 import { colors } from '../../src/theme';
 
 const SECTIONS = [
@@ -27,6 +28,12 @@ export default function More() {
         {email && (
           <>
             <Row icon="at-sign" iconColor={colors.pink} title="Email Accounts" subtitle={store.emailAccounts.length ? `${store.emailAccounts.length} connected` : 'Connect your inbox'} onPress={() => router.push('/email-accounts')} />
+            <Divider />
+          </>
+        )}
+        {(TEAMS_UI || store.teams.length > 0) && (
+          <>
+            <Row icon="users" iconColor={colors.pink} title="Team" subtitle={store.teams.length ? store.teams.map((t) => t.name).join(', ') : 'Share projects and assign steps by role'} onPress={() => router.push('/team')} />
             <Divider />
           </>
         )}

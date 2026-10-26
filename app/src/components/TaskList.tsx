@@ -8,15 +8,17 @@ import { minutesOf } from '../core/workload';
 import type { Action, DeadlineType } from '../core/types';
 import { useStore } from '../lib/store';
 import { EditTask } from './EditTask';
+import { AssignChips } from './TeamBits';
+import { assigneeLabel } from '../core/team';
 import { colors, fonts } from '../theme';
 import { Body, Chip, Icon, Muted, Sheet, SheetOption } from './ui';
 
 const OPEN: Action['status'][] = ['ready', 'in_progress', 'waiting', 'blocked'];
 
-/** Open tasks, optionally filtered. Every task the user has is reachable from here. Dated tasks come first, soonest on top. */
-export function useOpenTasks(filter?: (a: Action) => boolean) {
+/** Open tasks, optionally filtered: the person's own, or (`everyone`) every step on their team projects too. Dated first, soonest on top. */
+export function useOpenTasks(filter?: (a: Action) => boolean, everyone = false) {
   const store = useStore();
-  return store.actions
+  return (everyone ? store.allActions : store.actions)
     .filter((a) => OPEN.includes(a.status) && (!filter || filter(a)))
     .sort((x, y) =>
       (x.due_date ? 0 : 1) - (y.due_date ? 0 : 1) || (x.due_date ?? '').localeCompare(y.due_date ?? '')
@@ -57,7 +59,10 @@ export function addedLabel(a: Pick<Action, 'created_at' | 'origin'>): string {
 export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { tasks: Action[]; limit?: number; emptyText?: string; showAdded?: boolean; hideProject?: boolean }) {
   const store = useStore();
   const [open, setOpen] = useState<Action | null>(null);
-  const [panel, setPanel] = useState<'menu' | 'area' | 'due'>('menu');
+  const [panel, setPanel] = useState<'menu' | 'area' | 'due' | 'assign'>('menu');
+  const team = { members: store.teamMembers, roles: store.teamRoles, memberRoles: store.teamMemberRoles };
+  // On team projects each row says who has it.
+  const who = (a: Action) => (a.goal_id && store.goals.find((g) => g.id === a.goal_id)?.team_id ? assigneeLabel(a, team, store.me) ?? 'Unassigned' : null);
   const [all, setAll] = useState(false);
   const [editing, setEditing] = useState<Action | null>(null);
   const pinnedId = store.checkins.find((c) => c.day === toISODate(new Date()))?.tomorrow_first_action_id ?? null;
@@ -78,7 +83,7 @@ export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { 
 
   if (!tasks.length) return emptyText ? <Muted style={{ marginVertical: 6 }}>{emptyText}</Muted> : null;
 
-  const live = open ? store.actions.find((a) => a.id === open.id) ?? open : null;
+  const live = open ? store.allActions.find((a) => a.id === open.id) ?? open : null;
   const openGoal = live?.goal_id ? store.goals.find((g) => g.id === live.goal_id) : null;
   const openArea = live ? store.lifeAreas.find((x) => x.id === (live.life_area_id ?? openGoal?.life_area_id)) : null;
   const why = live ? suggestWhy(live.title, { areaName: openArea?.name, minutes: live.estimated_minutes, due: live.due_date ? { date: live.due_date, type: live.deadline_type ?? 'target' } : null }) : null;
@@ -101,7 +106,7 @@ export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { 
         const area = store.lifeAreas.find((x) => x.id === (a.life_area_id ?? goal?.life_area_id));
         const due = dueLabel(a);
         const snoozed = a.snoozed_until && daysUntil(a.snoozed_until) > 0 ? `Snoozed until ${friendlyDate(a.snoozed_until)}` : null;
-        const meta = [hideProject ? null : goal?.title, !goal && !hideProject && area?.name,
+        const meta = [who(a), hideProject ? null : goal?.title, !goal && !hideProject && area?.name,
           // Estimated time: the task's own, or a guess from its wording marked with ~.
           a.estimated_minutes ? `${a.estimated_minutes} min` : `~${minutesOf(a)} min`, a.status === 'waiting' ? 'Waiting' : a.status === 'blocked' ? 'Blocked' : null, snoozed]
           .filter(Boolean).join(' · ');
@@ -144,6 +149,7 @@ export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { 
             {!live.goal_id && <SheetOption icon="folder-plus" label={projectLike ? 'Turn into a project (it has several steps)' : 'Make this a project'} onPress={() => makeProject(live)} />}
             <SheetOption icon="calendar" label={live.due_date ? `Due date: ${friendlyDate(live.due_date)}` : 'Set a due date'} onPress={() => setPanel('due')} />
             {!live.goal_id && <SheetOption icon="grid" label={`Life area: ${store.lifeAreas.find((x) => x.id === live.life_area_id)?.name ?? 'none'}`} onPress={() => setPanel('area')} />}
+            {openGoal?.team_id && <SheetOption icon="user-check" label={`Who's doing it: ${who(live) ?? 'Unassigned'}`} onPress={() => setPanel('assign')} />}
             {openGoal && <SheetOption icon="folder" label={`Open project: ${openGoal.title}`} onPress={() => { close(); router.push({ pathname: '/project/[id]', params: { id: openGoal.id } }); }} />}
             {live.status !== 'waiting'
               ? <SheetOption icon="clock" label="I'm waiting on something" onPress={() => { store.updateAction(live.id, { status: 'waiting' }); close(); }} />
@@ -161,6 +167,10 @@ export function TaskList({ tasks, limit, emptyText, showAdded, hideProject }: { 
               <Chip label="None" selected={!live.life_area_id} onPress={() => { store.updateAction(live.id, { life_area_id: null }); close(); }} />
             </View>
           </>
+        )}
+        {live && panel === 'assign' && openGoal?.team_id && (
+          <AssignChips teamId={openGoal.team_id} value={{ assignee_id: live.assignee_id ?? null, assigned_role_id: live.assigned_role_id ?? null }}
+            onChange={(v) => { store.updateAction(live.id, v); close(); }} />
         )}
         {live && panel === 'due' && (
           <>

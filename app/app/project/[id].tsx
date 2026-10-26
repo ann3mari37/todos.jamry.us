@@ -3,6 +3,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
 import { ProjectBanner } from '../../src/components/FlowerArt';
+import { AssignChips, TEAMS_UI } from '../../src/components/TeamBits';
+import { assigneeLabel } from '../../src/core/team';
 import { Banner, Body, Button, Card, Chip, Divider, Field, H1, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, shortDate, timeOfDay } from '../../src/core/dates';
 import { goalProgress } from '../../src/core/recommend';
@@ -33,7 +35,7 @@ export default function Project() {
   const store = useStore();
   const goal = store.goals.find((g) => g.id === id);
   const [tab, setTab] = useState<'overview' | 'steps' | 'notes' | 'files'>('overview');
-  const [sheet, setSheet] = useState<null | 'title' | 'meaning' | 'deadline' | 'area' | 'status' | 'accountability' | 'more' | 'add' | 'blockers'>(null);
+  const [sheet, setSheet] = useState<null | 'title' | 'meaning' | 'deadline' | 'area' | 'status' | 'accountability' | 'more' | 'add' | 'blockers' | 'team'>(null);
   const [editAction, setEditAction] = useState<Action | null>(null);
   const [genBusy, setGenBusy] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
@@ -50,7 +52,7 @@ export default function Project() {
   useEffect(() => {
     if (!goal || store.loading || autoSuggested.current === goal.id) return;
     autoSuggested.current = goal.id;
-    const has = store.actions.some((a) => a.goal_id === goal.id && a.status !== 'dismissed');
+    const has = store.allActions.some((a) => a.goal_id === goal.id && a.status !== 'dismissed');
     if (has || !['active', 'waiting', 'blocked'].includes(goal.status)) return;
     const { template, steps } = suggestSteps(goal.title, [], 3);
     store.createSteps(goal.id, steps.map((st) => ({ title: st.title, estimated_minutes: st.minutes })))
@@ -62,16 +64,18 @@ export default function Project() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assist]);
 
-  const actions = useMemo(() => store.actions.filter((a) => a.goal_id === id), [store.actions, id]);
+  const actions = useMemo(() => store.allActions.filter((a) => a.goal_id === id), [store.allActions, id]);
   const deps = store.dependencies;
   const waitingOn = (a: Action) => deps.filter((d) => d.action_id === a.id).map((d) => actions.find((x) => x.id === d.depends_on_id)).filter((x) => x && x.status !== 'completed') as Action[];
   const open = actions.filter((a) => ['ready', 'in_progress', 'waiting', 'blocked'].includes(a.status));
   const suggested = actions.filter((a) => a.status === 'suggested');
   const completed = actions.filter((a) => a.status === 'completed').sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
   const next = open.slice(0, 3);
-  const { done, total } = goalProgress(id, store.actions);
+  const { done, total } = goalProgress(id, store.allActions);
   const recent = store.accomplishments.filter((a) => a.goal_id === id).slice(0, 5);
   const area = store.lifeAreas.find((a) => a.id === goal?.life_area_id);
+  // Only the project's owner moves it into or out of a team.
+  const canShare = !!goal && (!goal.user_id || goal.user_id === store.me);
   const suggestedWhy = goal ? suggestWhy(goal.title, { isProject: true, areaName: area?.name, due: goal.deadline ? { date: goal.deadline, type: goal.deadline_type } : null }) ?? '' : '';
 
   if (!goal) {
@@ -84,7 +88,7 @@ export default function Project() {
   }
 
   const update = (p: Partial<Goal>) => store.updateGoal(goal.id, p);
-  const health = projectHealth(goal, store.actions, new Date(), store.accountability?.inactivity_days ?? 10);
+  const health = projectHealth(goal, store.allActions, new Date(), store.accountability?.inactivity_days ?? 10);
 
   // Rule-based steps from the matching template (no AI needed), skipping ones the project already has.
   const fromTemplate = async () => {
@@ -123,6 +127,7 @@ export default function Project() {
     router.push({ pathname: '/celebrate', params: { action: a.id } });
   };
 
+  const team = { members: store.teamMembers, roles: store.teamRoles, memberRoles: store.teamMemberRoles };
   const ActionRow = ({ a }: { a: Action }) => {
     const blockedBy = waitingOn(a);
     const isDone = a.status === 'completed';
@@ -141,6 +146,7 @@ export default function Project() {
         <Pressable style={{ flex: 1 }} onPress={() => setEditAction(a)} accessibilityRole="button" accessibilityLabel={`Edit ${a.title}`}>
           <Body style={{ textDecorationLine: isDone ? 'line-through' : 'none', color: isDone ? colors.textMuted : colors.text }}>{a.title}</Body>
           {blockedBy.length > 0 && <Muted>After: {blockedBy.map((b) => b.title).join(', ')}</Muted>}
+          {goal?.team_id && <Muted>{isDone ? (a.completed_by ? `Done by ${a.completed_by === store.me ? 'you' : assigneeLabel({ assignee_id: a.completed_by }, team)}` : 'Done') : assigneeLabel(a, team, store.me) ?? 'Unassigned'}</Muted>}
           {a.status === 'waiting' && <Muted>Waiting</Muted>}
           {a.status === 'blocked' && <Muted>Blocked</Muted>}
           {a.requires_clarification && !isDone && <Muted style={{ color: '#C98A1B' }}>Check the official requirements first</Muted>}
@@ -236,6 +242,12 @@ export default function Project() {
             <Divider />
             <Row icon="tag" title="Life area" value={area?.name ?? 'None'} right={area ? <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: area.color }} /> : null} onPress={() => setSheet('area')} />
             <Divider />
+            {(goal.team_id || (TEAMS_UI && store.teams.length > 0)) && (
+              <>
+                <Row icon="users" title="Team" value={store.teams.find((t) => t.id === goal.team_id)?.name ?? 'Just me'} onPress={canShare ? () => setSheet('team') : undefined} />
+                <Divider />
+              </>
+            )}
             <Row icon="pause-circle" title="Status" value={STATUSES.find((s) => s.value === goal.status)?.label} onPress={() => setSheet('status')} />
             <Divider />
             <Row icon="eye" title="Accountability" value={ACCOUNTABILITY.find((s) => s.value === goal.accountability)?.label} onPress={() => setSheet('accountability')} />
@@ -286,6 +298,11 @@ export default function Project() {
           <Chip label="None" selected={!goal.life_area_id} onPress={() => { update({ life_area_id: null }); setSheet(null); }} />
           {store.lifeAreas.filter((a) => !a.archived_at).map((a) => <Chip key={a.id} label={a.name} selected={goal.life_area_id === a.id} onPress={() => { update({ life_area_id: a.id }); setSheet(null); }} />)}
         </View>
+      </Sheet>
+      <Sheet visible={sheet === 'team'} onClose={() => setSheet(null)} title="Who works on this project?">
+        <Muted style={{ marginBottom: 10 }}>On a team, everyone on it sees this project and its steps, and each step can go to a person or a role. Your life areas and history stay private.</Muted>
+        <SheetOption icon={!goal.team_id ? 'check-circle' : 'circle'} label="Just me" onPress={() => { update({ team_id: null }); setSheet(null); }} />
+        {store.teams.map((t) => <SheetOption key={t.id} icon={goal.team_id === t.id ? 'check-circle' : 'circle'} label={t.name} onPress={() => { update({ team_id: t.id }); setSheet(null); }} />)}
       </Sheet>
       <Sheet visible={sheet === 'status'} onClose={() => setSheet(null)} title="Status">
         {STATUSES.map((s) => <SheetOption key={s.value} icon={goal.status === s.value ? 'check-circle' : 'circle'} label={s.label} onPress={() => { update({ status: s.value }); setSheet(null); if (s.value === 'completed') router.push({ pathname: '/celebrate', params: { goal: goal.id } }); }} />)}
@@ -361,6 +378,7 @@ function EditActionSheet({ action, onClose, siblings }: { action: Action | null;
   const [mins, setMins] = useState('');
   useEffect(() => { if (action) { setTitle(action.title); setMins(action.estimated_minutes ? String(action.estimated_minutes) : ''); } }, [action]);
   if (!action) return null;
+  const teamId = store.goals.find((g) => g.id === action.goal_id)?.team_id ?? null;
   const deps = store.dependencies.filter((d) => d.action_id === action.id).map((d) => d.depends_on_id);
   const toggleDep = async (other: Action) => {
     if (deps.includes(other.id)) await supabase.from('action_dependencies').delete().eq('action_id', action.id).eq('depends_on_id', other.id);
@@ -372,6 +390,12 @@ function EditActionSheet({ action, onClose, siblings }: { action: Action | null;
       <Field label="Step" value={title} onChangeText={setTitle} />
       <Field label="Minutes (optional)" value={mins} onChangeText={setMins} keyboardType="number-pad" />
       <Button title="Save" disabled={!title.trim()} onPress={() => { store.updateAction(action.id, { title: title.trim(), estimated_minutes: mins ? Math.max(1, Math.min(600, parseInt(mins, 10) || 1)) : null }); onClose(); }} />
+      {teamId && (
+        <>
+          <Muted style={{ marginTop: 14, marginBottom: 6, fontFamily: fonts.medium, color: colors.text }}>Who’s doing it?</Muted>
+          <AssignChips teamId={teamId} value={{ assignee_id: action.assignee_id ?? null, assigned_role_id: action.assigned_role_id ?? null }} onChange={(v) => { store.updateAction(action.id, v); onClose(); }} />
+        </>
+      )}
       <Muted style={{ marginTop: 14, marginBottom: 6, fontFamily: fonts.medium, color: colors.text }}>State</Muted>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         {(['ready', 'in_progress', 'waiting', 'blocked'] as const).map((s) => (

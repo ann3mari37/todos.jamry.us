@@ -6,7 +6,8 @@
 import { z } from 'zod';
 import { handoffToDrafts, draftsToCommit, HandoffItem, type HandoffInterpretation } from '../../app/src/core/handoff';
 import { recommend, KIND_LABEL } from '../../app/src/core/recommend';
-import type { Action, Goal, LifeArea } from '../../app/src/core/types';
+import { assigneeLabel, isMine, resolveAssignee, type TeamData } from '../../app/src/core/team';
+import type { Action, Goal, LifeArea, Team, TeamMember, TeamMemberRole, TeamRole } from '../../app/src/core/types';
 import { crunch, projectHealth, staleTasks } from '../../app/src/core/workload';
 import { emailLink, emailRef, oneLine, scoreEmail, type BriefAccount, type BriefMessage } from '../../app/src/core/emailBrief';
 import { BriefingInput, modifyMessages, personToday, saveChatBriefing, threadTextFor } from './email/service';
@@ -149,20 +150,27 @@ const TOOLS = [
     name: 'add_task',
     title: 'Add a task now',
     description: 'Adds one task straight to their list, without review. Use only when they clearly ask to add something specific ("add call the dentist tomorrow"); for plans use send_plan. A task added to a project goes after its existing steps. Give minutes when you know the size of the work; otherwise leave it out rather than guess.',
-    inputSchema: { type: 'object', required: ['title'], properties: { ...taskProps, notes: { type: 'string', maxLength: 4000, description: 'The task’s details: links, who to call, specifics' } } },
+    inputSchema: { type: 'object', required: ['title'], properties: { ...taskProps, notes: { type: 'string', maxLength: 4000, description: 'The task’s details: links, who to call, specifics' }, assignee: { type: 'string', maxLength: 80, description: "Team projects only: who does it. A teammate’s name, a role name (anyone holding the role can take it), \"me\", or \"none\". See teams in get_overview." } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: 'create_project',
     title: 'Start a project now',
-    description: 'Creates one project with its first steps straight away, without review. Leave out steps to get Momentum’s starter steps for that kind of project. Steps keep the order you give; put all of a project’s steps here (up to 5) and add later ones with add_task, which appends them. Use only when they clearly ask; for plans use send_plan.',
-    inputSchema: { type: 'object', required: ['title'], properties: { title: taskProps.title, why: taskProps.why, due_date: taskProps.due_date, hard_deadline: taskProps.hard_deadline, area: taskProps.area, steps: taskProps.steps } },
+    description: 'Creates one project with its first steps straight away, without review. With team, it goes on that team and each step can name its assignee. Leave out steps to get Momentum’s starter steps for that kind of project. Steps keep the order you give; put all of a project’s steps here (up to 5) and add later ones with add_task, which appends them. Use only when they clearly ask; for plans use send_plan.',
+    inputSchema: {
+      type: 'object', required: ['title'],
+      properties: {
+        title: taskProps.title, why: taskProps.why, due_date: taskProps.due_date, hard_deadline: taskProps.hard_deadline, area: taskProps.area,
+        team: { type: 'string', maxLength: 80, description: 'Put the project on this team (its name from get_overview) so every member sees it' },
+        steps: { ...taskProps.steps, items: { ...taskProps.steps.items, properties: { ...taskProps.steps.items.properties, assignee: { type: 'string', maxLength: 80, description: 'With team: a teammate or role for this step' } } } },
+      },
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: 'update_task',
     title: 'Change a task',
-    description: 'Changes a task: its title, life area, project, date, estimated minutes, its place among its project’s steps, or whether it is waiting on someone. Use task ids from get_overview (each project lists its open steps in order). To put a project’s steps in order, call this with position for each step that is out of place.',
+    description: 'Changes a task: its title, life area, project, date, estimated minutes, its place among its project’s steps, who on the team does it, or whether it is waiting on someone. Use task ids from get_overview (each project lists its open steps in order). To put a project’s steps in order, call this with position for each step that is out of place.',
     inputSchema: {
       type: 'object',
       required: ['id'],
@@ -177,6 +185,7 @@ const TOOLS = [
         minutes: { type: ['integer', 'null'], minimum: 1, maximum: 600, description: 'Estimated minutes, or null to clear a wrong estimate' },
         position: { type: 'integer', minimum: 1, description: "Where it goes among its project's open steps: 1 = first. Larger than the number of steps = last." },
         notes: { type: ['string', 'null'], maxLength: 4000, description: 'The task’s details (links, who to call, specifics). Replaces what is there: start from the notes in get_overview to keep them. Empty or null clears.' },
+        assignee: { type: 'string', maxLength: 80, description: "Team projects only: who does it. A teammate’s name, a role name (anyone holding the role can take it), \"me\", or \"none\". See teams in get_overview." },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -184,7 +193,7 @@ const TOOLS = [
   {
     name: 'update_project',
     title: 'Change a project',
-    description: 'Changes a project: its title, why it matters, life area, or due date, or adds a note to its Notes tab. Use project ids from get_overview. For the order of its steps, use update_task with position.',
+    description: 'Changes a project: its title, why it matters, life area, due date or team, or adds a note to its Notes tab. Use project ids from get_overview. For the order of its steps, use update_task with position.',
     inputSchema: {
       type: 'object',
       required: ['id'],
@@ -196,6 +205,7 @@ const TOOLS = [
         due_date: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear' },
         hard_deadline: { type: 'boolean' },
         add_note: { type: 'string', maxLength: 4000, description: 'Adds a note to the project’s Notes tab (instructions, decisions, context)' },
+        team: { type: 'string', maxLength: 80, description: 'Move the project onto a team (its name) or "none" to make it personal again. Only the project’s owner can.' },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -256,6 +266,7 @@ const INSTRUCTIONS = [
   'Use add_task / create_project only for a single thing they clearly asked to add now.',
   'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
   'Email: for "what is in my email" or "what should I answer first", call get_inbox, read the threads that matter with read_email_thread, then save_email_briefing with a cohesive paragraph and a ranked do_first list, and tell them the same. Offer send_plan (with from_email) to turn emails into tasks. Archive or label only when asked.',
+  'Teams: if get_overview lists teams, work shared with others belongs on a team project (create_project with team, or update_project team). Give every step on a team project an assignee: the person when it is clearly theirs, otherwise the role whose description fits (a role leaves it open to anyone holding it). Steps that say "needs the coach" or similar go to that role or person. Use the exact names from teams; never invent people or roles, and if a role is missing, tell them to add it under Settings, Team. Their Today only shows team steps assigned to them or their role.',
   'Keep their lists true to the plan: when you learn a step’s real size, a date moving, or a better order, fix it with update_task (minutes, due_date, position, notes) or update_project (due_date, add_note). Put specifics (links, who to call, decisions) in a task’s notes, its details section, and tell them what you changed. Steps you add later go to the end of their project, so set position when they belong earlier.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
@@ -276,6 +287,7 @@ const UpdateInput = z.object({
   minutes: z.preprocess(numberish, z.number().int().min(1).max(600).nullable().optional()),
   position: z.preprocess(numberish, z.number().int().min(1).optional()),
   notes: z.preprocess((v) => v === 'null' ? null : v, z.string().max(4000).nullable().optional()),
+  assignee: z.string().trim().max(80).optional(),
 });
 const ProjectUpdateInput = z.object({
   id: z.string().uuid(),
@@ -285,6 +297,7 @@ const ProjectUpdateInput = z.object({
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   hard_deadline: z.boolean().optional(),
   add_note: z.string().trim().min(1).max(4000).optional(),
+  team: z.string().trim().min(1).max(80).optional(),
 });
 const PlanInput = z.object({ summary: z.string().trim().max(2000).default(''), items: z.array(HandoffItem).min(1).max(20) });
 const IdInput = z.object({ id: z.string().uuid() });
@@ -295,28 +308,62 @@ async function load(ctx: Ctx) {
     must(ctx.db.from('goals').select('*').in('status', LIVE_GOALS).order('created_at')),
     must(ctx.db.from('actions').select('*').in('status', [...OPEN, 'suggested']).order('sort_order').order('created_at')),
   ]);
-  return { areas: areas as LifeArea[], goals: goals as Goal[], actions: actions as Action[] };
+  // Teams are optional: before the teams migration (or with no team) these come back empty.
+  const soft = async <T>(q: PromiseLike<{ data: unknown; error: unknown }>): Promise<T[]> => { const { data, error } = await q; return error ? [] : ((data ?? []) as T[]); };
+  const [teams, members, roles, memberRoles] = await Promise.all([
+    soft<Team>(ctx.db.from('teams').select('*').order('created_at')),
+    soft<TeamMember>(ctx.db.from('team_members').select('*')),
+    soft<TeamRole>(ctx.db.from('team_roles').select('*').order('created_at')),
+    soft<TeamMemberRole>(ctx.db.from('team_member_roles').select('*')),
+  ]);
+  const team: TeamData = { members, roles, memberRoles };
+  // What is this person's to do (Today, attention): their own tasks, plus team steps assigned to them or their role.
+  const mineActions = (actions as Action[]).filter((a) => isMine(a, goals as Goal[], ctx.userId, team));
+  const mineGoals = (goals as Goal[]).filter((g) => !g.team_id || g.user_id === ctx.userId || mineActions.some((a) => a.goal_id === g.id));
+  return { areas: areas as LifeArea[], goals: goals as Goal[], actions: actions as Action[], teams, team, mineActions, mineGoals };
+}
+
+/** Who has a step, for the chat: a name, "you", "Developer (open)", or null off team projects. */
+function whoHas(a: Action, goals: Goal[], team: TeamData, me: string): string | null {
+  if (!goals.find((g) => g.id === a.goal_id)?.team_id) return null;
+  if (a.assignee_id === me) return 'you';
+  return assigneeLabel(a, team)?.replace(' · open', ' (open: anyone with this role)') ?? 'nobody yet';
 }
 
 const areaName = (areas: LifeArea[], id: string | null) => areas.find((a) => a.id === id)?.name ?? null;
 
 async function overview(ctx: Ctx) {
-  const { areas, goals, actions } = await load(ctx);
+  const { areas, goals, actions, teams, team, mineActions, mineGoals } = await load(ctx);
   const { count } = await ctx.db.from('capture_entries').select('id', { count: 'exact', head: true }).eq('source', 'chat').eq('status', 'interpreted');
-  const open = actions.filter((a) => OPEN.includes(a.status));
-  const due = crunch(actions, goals);
-  const stale = staleTasks(actions, goals);
+  const open = mineActions.filter((a) => OPEN.includes(a.status));
+  const due = crunch(mineActions, mineGoals);
+  const stale = staleTasks(mineActions, mineGoals);
   const pinned = await pins(ctx, actions);
+  const me = ctx.userId;
   return {
     ...pinned,
     life_areas: areas.map((a) => a.name),
+    ...(teams.length ? {
+      teams: teams.map((t) => ({
+        name: t.name,
+        people: team.members.filter((m) => m.team_id === t.id).map((m) => ({
+          name: m.display_name, is_you: m.user_id === me, admin: m.is_admin,
+          roles: team.memberRoles.filter((r) => r.team_id === t.id && r.user_id === m.user_id).map((r) => team.roles.find((x) => x.id === r.role_id)?.name).filter(Boolean),
+        })),
+        roles: team.roles.filter((r) => r.team_id === t.id).map((r) => ({ name: r.name, does: r.description })),
+      })),
+    } : {}),
     projects: goals.map((g) => {
       const steps = actions.filter((a) => a.goal_id === g.id);
       return {
         id: g.id, title: g.title, status: g.status, area: areaName(areas, g.life_area_id), why: g.meaning,
+        ...(g.team_id ? { team: teams.find((t) => t.id === g.team_id)?.name ?? null, owned_by_you: g.user_id === me } : {}),
         health: g.status === 'active' ? (({ label, message }) => ({ label, message }))(projectHealth(g, actions)) : null,
         due: g.deadline ? `${g.deadline}${g.deadline_type === 'hard' ? ' (hard deadline)' : ''}` : null,
-        open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 30).map((a) => ({ id: a.id, title: a.title, minutes: a.estimated_minutes, due: a.due_date, waiting: a.status === 'waiting', notes: a.notes })),
+        open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 30).map((a) => ({
+          id: a.id, title: a.title, minutes: a.estimated_minutes, due: a.due_date, waiting: a.status === 'waiting', notes: a.notes,
+          ...(g.team_id ? { assignee: whoHas(a, goals, team, me) } : {}),
+        })),
         last_progress: g.last_meaningful_progress_at?.slice(0, 10) ?? null,
       };
     }),
@@ -365,7 +412,7 @@ async function pins(ctx: Ctx, actions: Action[]) {
 }
 
 async function today(ctx: Ctx) {
-  const { areas, goals, actions } = await load(ctx);
+  const { areas, mineGoals: goals, mineActions: actions } = await load(ctx);
   const [deps, feedback] = await Promise.all([
     must(ctx.db.from('action_dependencies').select('action_id,depends_on_id')),
     must(ctx.db.from('recommendation_feedback').select('action_id,goal_id,response,created_at').gte('created_at', new Date(Date.now() - 30 * 86_400_000).toISOString())),
@@ -424,8 +471,24 @@ async function addNow(ctx: Ctx, item: HandoffItem) {
   };
 }
 
+/** A team by name (or id), for the chat. */
+function findTeam(teams: Team[], name: string): Team {
+  const n = name.toLowerCase();
+  const t = teams.find((x) => x.id === name || x.name.toLowerCase() === n) ?? teams.find((x) => x.name.toLowerCase().includes(n));
+  if (!t) throw new ToolError(teams.length ? `No team called "${name}". Their teams: ${teams.map((x) => x.name).join(', ')}.` : 'They are not on a team. Teams are set up in Momentum: Settings, Team.');
+  return t;
+}
+
+/** Who should do a step on a team project, from a name, role, "me" or "none". */
+function assignment(ctx: Ctx, goal: Goal | undefined, who: string, team: TeamData) {
+  if (!goal?.team_id) throw new ToolError('Only steps on a team project can be assigned. Put the project on a team first (update_project with team).');
+  const r = resolveAssignee(who, goal.team_id, ctx.userId, team);
+  if ('error' in r) throw new ToolError(r.error);
+  return r;
+}
+
 async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
-  const { areas, goals, actions } = await load(ctx);
+  const { areas, goals, actions, team } = await load(ctx);
   const task = actions.find((a) => a.id === input.id);
   if (!task) throw new ToolError('No open task with that id. Call get_overview for current ids.');
   const p: Record<string, unknown> = {};
@@ -452,9 +515,13 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
   if (input.waiting !== undefined) p.status = input.waiting ? 'waiting' : 'ready';
   if (input.minutes !== undefined) p.estimated_minutes = input.minutes;
   if (input.notes !== undefined) p.notes = input.notes?.trim() || null;
+  if (input.assignee !== undefined) {
+    const goalId = p.goal_id === undefined ? task.goal_id : (p.goal_id as string | null);
+    Object.assign(p, assignment(ctx, goals.find((g) => g.id === goalId), input.assignee, team));
+  }
   if (!Object.keys(p).length && input.position === undefined) throw new ToolError('Nothing to change.');
   if (Object.keys(p).length) await must(ctx.db.from('actions').update(p).eq('id', task.id).select('id'));
-  const changed = Object.keys(p).filter((k) => k !== 'user_edited');
+  const changed = Object.keys(p).filter((k) => k !== 'user_edited' && k !== 'assigned_role_id').map((k) => (k === 'assignee_id' ? 'assignee' : k));
   if (input.position !== undefined) {
     const goalId = (p.goal_id as string | null | undefined) === undefined ? task.goal_id : (p.goal_id as string | null);
     if (!goalId) throw new ToolError('Only tasks in a project have a position. Set project first.');
@@ -471,7 +538,7 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
 }
 
 async function updateProject(ctx: Ctx, input: z.infer<typeof ProjectUpdateInput>) {
-  const { areas, goals } = await load(ctx);
+  const { areas, goals, teams } = await load(ctx);
   const goal = goals.find((g) => g.id === input.id);
   if (!goal) throw new ToolError('No open project with that id. Call get_overview for current ids.');
   const p: Record<string, unknown> = {};
@@ -487,10 +554,14 @@ async function updateProject(ctx: Ctx, input: z.infer<typeof ProjectUpdateInput>
     p.deadline = input.due_date;
     p.deadline_type = input.due_date ? (input.hard_deadline ? 'hard' : 'target') : 'none';
   } else if (input.hard_deadline !== undefined && goal.deadline) p.deadline_type = input.hard_deadline ? 'hard' : 'target';
+  if (input.team !== undefined) {
+    if (goal.user_id && goal.user_id !== ctx.userId) throw new ToolError('Only the project’s owner can change its team.');
+    p.team_id = input.team.toLowerCase() === 'none' ? null : findTeam(teams, input.team).id;
+  }
   if (!Object.keys(p).length && !input.add_note) throw new ToolError('Nothing to change.');
   if (Object.keys(p).length) await must(ctx.db.from('goals').update(p).eq('id', goal.id).select('id'));
   if (input.add_note) await must(ctx.db.from('goal_context').insert({ goal_id: goal.id, kind: 'note', body: input.add_note }).select('id'));
-  return { status: 'updated', id: goal.id, changed: [...Object.keys(p).filter((k) => k !== 'meaning_source'), ...(input.add_note ? ['note added'] : [])] };
+  return { status: 'updated', id: goal.id, changed: [...Object.keys(p).filter((k) => k !== 'meaning_source').map((k) => (k === 'team_id' ? 'team' : k)), ...(input.add_note ? ['note added'] : [])] };
 }
 
 async function completeTask(ctx: Ctx, id: string) {
@@ -551,12 +622,35 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
     case 'get_today': return today(ctx);
     case 'send_plan': return sendPlan(ctx, parse(PlanInput, args), client);
     case 'add_task': {
-      const { notes } = parse(z.object({ notes: z.string().trim().max(4000).optional() }), args);
+      const { notes, assignee } = parse(z.object({ notes: z.string().trim().max(4000).optional(), assignee: z.string().trim().max(80).optional() }), args);
       const added = await addNow(ctx, { ...parse(HandoffItem.omit({ kind: true }), args), kind: 'task' });
-      if (notes && added.id) await must(ctx.db.from('actions').update({ notes }).eq('id', added.id).select('id'));
-      return notes ? { ...added, notes } : added;
+      if (!added.id) return added;
+      const extra: Record<string, unknown> = notes ? { notes } : {};
+      if (assignee) {
+        const { goals, team } = await load(ctx);
+        const row = await must(ctx.db.from('actions').select('goal_id').eq('id', added.id).single()) as { goal_id: string | null };
+        Object.assign(extra, assignment(ctx, goals.find((g) => g.id === row.goal_id), assignee, team));
+      }
+      if (Object.keys(extra).length) await must(ctx.db.from('actions').update(extra).eq('id', added.id).select('id'));
+      return { ...added, ...(notes ? { notes } : {}), ...(assignee ? { assignee } : {}) };
     }
-    case 'create_project': return addNow(ctx, { ...parse(HandoffItem.omit({ kind: true, project: true, minutes: true }), args), kind: 'project' });
+    case 'create_project': {
+      const extra = parse(z.object({ team: z.string().trim().min(1).max(80).optional(), steps: z.array(z.object({ assignee: z.string().trim().max(80).optional() }).passthrough()).optional() }), args);
+      const loaded = extra.team ? await load(ctx) : null;
+      const teamRow = loaded && extra.team ? findTeam(loaded.teams, extra.team) : null;
+      const created = await addNow(ctx, { ...parse(HandoffItem.omit({ kind: true, project: true, minutes: true }), args), kind: 'project' });
+      if (!teamRow || !created.id) return created;
+      await must(ctx.db.from('goals').update({ team_id: teamRow.id }).eq('id', created.id).select('id'));
+      const goal = { id: created.id, team_id: teamRow.id } as Goal;
+      const steps = await must(ctx.db.from('actions').select('id,title').eq('goal_id', created.id).order('sort_order')) as { id: string; title: string }[];
+      const assigned = await Promise.all(steps.map(async (st, i) => {
+        const who = extra.steps?.[i]?.assignee;
+        if (!who) return { id: st.id, title: st.title, assignee: null };
+        await must(ctx.db.from('actions').update(assignment(ctx, goal, who, loaded!.team)).eq('id', st.id).select('id'));
+        return { id: st.id, title: st.title, assignee: who };
+      }));
+      return { ...created, team: teamRow.name, steps: assigned };
+    }
     case 'update_task': return updateTask(ctx, parse(UpdateInput, args));
     case 'update_project': return updateProject(ctx, parse(ProjectUpdateInput, args));
     case 'complete_task': return completeTask(ctx, parse(IdInput, args).id);

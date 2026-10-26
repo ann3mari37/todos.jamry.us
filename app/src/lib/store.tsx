@@ -7,7 +7,8 @@ import type { CommitItem, EmailCategory, EmailStep } from '../core/ai-contracts'
 import { toISODate } from '../core/dates';
 import type { HandoffInterpretation } from '../core/handoff';
 import { DEMO, demo, demoSession } from './demo';
-import type { Accomplishment, Action, Dependency, FeedbackEntry, Goal, LifeArea } from '../core/types';
+import { isMine } from '../core/team';
+import type { Accomplishment, Action, Dependency, FeedbackEntry, Goal, LifeArea, Team, TeamInvite, TeamMember, TeamMemberRole, TeamRole } from '../core/types';
 import { api, ApiError } from './api';
 import { supabase } from './supabase';
 
@@ -35,6 +36,8 @@ export interface DayCheckin {
   /** Today's plan (see usePlan), shared by all the person's devices. */
   plan?: unknown;
 }
+/** What an invite link is for, shown before joining. */
+export interface InviteInfo { team: string; role: string | null; name: string | null; invited_by: string | null; valid: boolean; already_member: boolean }
 /** An AI app the user allowed to reach Momentum (Supabase OAuth grant). */
 export interface ChatConnection { client_id: string; name: string; uri: string | null; granted_at: string }
 export interface EmailAccount {
@@ -86,12 +89,19 @@ export interface Snapshot {
   handoffs: Handoff[];
   /** Yesterday's and today's check-ins (newest first). */
   checkins: DayCheckin[];
+  /** Teams this person belongs to, with their people, roles and open invites (invites only for admins). */
+  teams: Team[];
+  teamMembers: TeamMember[];
+  teamRoles: TeamRole[];
+  teamMemberRoles: TeamMemberRole[];
+  teamInvites: TeamInvite[];
 }
 
 const EMPTY: Snapshot = {
   profile: null, lifeAreas: [], goals: [], actions: [], dependencies: [], accomplishments: [], events: [],
   feedback: [], nudges: [], reflections: [], accountability: null, notifications: null,
   emailAccounts: [], emailMessages: [], emailDigest: null, organizeRuns: [], handoffs: [], checkins: [],
+  teams: [], teamMembers: [], teamRoles: [], teamMemberRoles: [], teamInvites: [],
 };
 
 type OutboxOp =
@@ -250,12 +260,20 @@ function useStoreValue() {
           .order('created_at', { ascending: false }).limit(20), [] as Handoff[]),
         soft(supabase.from('daily_checkins').select('*').gte('day', yesterday).order('day', { ascending: false }), [] as DayCheckin[]),
       ]);
+      const [teams, teamMembers, teamRoles, teamMemberRoles, teamInvites] = await Promise.all([
+        soft(supabase.from('teams').select('*').order('created_at'), [] as Team[]),
+        soft(supabase.from('team_members').select('*').order('joined_at'), [] as TeamMember[]),
+        soft(supabase.from('team_roles').select('*').order('created_at'), [] as TeamRole[]),
+        soft(supabase.from('team_member_roles').select('*'), [] as TeamMemberRole[]),
+        soft(supabase.from('team_invites').select('*').is('accepted_at', null).order('created_at', { ascending: false }), [] as TeamInvite[]),
+      ]);
       const next: Snapshot = {
         profile: profile as Profile, lifeAreas: lifeAreas as LifeArea[], goals: goals as Goal[], actions: actions as Action[],
         dependencies: dependencies as Dependency[], accomplishments: accomplishments as Accomplishment[], events: events as ProgressEvent[],
         feedback: feedback as FeedbackEntry[], nudges: nudges as Nudge[], reflections: reflections as Reflection[],
         accountability: accountability as AccountabilityPrefs, notifications: notifications as NotificationPrefs,
         emailAccounts, emailMessages, emailDigest, organizeRuns, handoffs: handoffs.filter((h) => h.interpretation?.items?.length), checkins,
+        teams, teamMembers, teamRoles, teamMemberRoles, teamInvites,
       };
       setData(next);
       save(next);
@@ -566,6 +584,53 @@ function useStoreValue() {
     await check(supabase.from('notification_preferences').update(p).eq('user_id', session!.user.id));
   }, [patch, session]);
 
+  // ── Teams (the database checks who may do what; these just call it and reload).
+  const rpc = useCallback(async <T,>(fn: string, args: Record<string, unknown>): Promise<T> => {
+    const { data: out, error } = await supabase.rpc(fn, args);
+    if (error) throw new Error(error.message);
+    return out as T;
+  }, []);
+  const createTeam = useCallback(async (name: string, displayName: string) => {
+    const id = await rpc<string>('create_team', { p_name: name, p_display_name: displayName });
+    await refresh();
+    return id;
+  }, [rpc, refresh]);
+  const renameTeam = useCallback(async (id: string, name: string) => { await check(supabase.from('teams').update({ name }).eq('id', id)); await refresh(); }, [refresh]);
+  const saveTeamRole = useCallback(async (r: { id?: string; team_id: string; name: string; description?: string | null }) => {
+    if (r.id) await check(supabase.from('team_roles').update({ name: r.name, description: r.description ?? null }).eq('id', r.id));
+    else await check(supabase.from('team_roles').insert({ team_id: r.team_id, name: r.name, description: r.description ?? null }));
+    await refresh();
+  }, [refresh]);
+  const deleteTeamRole = useCallback(async (id: string) => { await check(supabase.from('team_roles').delete().eq('id', id)); await refresh(); }, [refresh]);
+  const setMemberRoles = useCallback(async (teamId: string, userId: string, roleIds: string[]) => {
+    await check(supabase.from('team_member_roles').delete().eq('team_id', teamId).eq('user_id', userId));
+    if (roleIds.length) await check(supabase.from('team_member_roles').insert(roleIds.map((role_id) => ({ team_id: teamId, user_id: userId, role_id }))));
+    await refresh();
+  }, [refresh]);
+  const updateMember = useCallback(async (teamId: string, userId: string, p: { display_name?: string; is_admin?: boolean }) => {
+    await check(supabase.from('team_members').update(p).eq('team_id', teamId).eq('user_id', userId));
+    await refresh();
+  }, [refresh]);
+  /** Removes someone (or yourself: leaving). Their steps on team projects go back to their role or the owner. */
+  const removeMember = useCallback(async (teamId: string, userId: string) => {
+    const goalIds = data.goals.filter((g) => g.team_id === teamId).map((g) => g.id);
+    if (goalIds.length) await check(supabase.from('actions').update({ assignee_id: null }).eq('assignee_id', userId).in('goal_id', goalIds));
+    await check(supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', userId));
+    await refresh();
+  }, [data.goals, refresh]);
+  const createInvite = useCallback(async (teamId: string, p: { name?: string; role_id?: string | null }) => {
+    const rows = await check(supabase.from('team_invites').insert({ team_id: teamId, name: p.name || null, role_id: p.role_id ?? null }).select('*'));
+    await refresh();
+    return (rows as TeamInvite[])[0];
+  }, [refresh]);
+  const revokeInvite = useCallback(async (id: string) => { await check(supabase.from('team_invites').delete().eq('id', id)); await refresh(); }, [refresh]);
+  const inviteInfo = useCallback((code: string) => rpc<InviteInfo | null>('invite_info', { p_code: code }), [rpc]);
+  const acceptInvite = useCallback(async (code: string, displayName: string) => {
+    const id = await rpc<string>('accept_invite', { p_code: code, p_display_name: displayName });
+    await refresh();
+    return id;
+  }, [rpc, refresh]);
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     await AsyncStorage.multiRemove([CACHE_KEY, OUTBOX_KEY]).catch(() => {});
@@ -579,15 +644,29 @@ function useStoreValue() {
     await refresh();
   }, [refresh, session]);
 
+  // Everything visible (team projects included) vs. what is this person's to do: Today, rings and the task lists use
+  // `actions` (theirs); project pages use `allActions` to show every step and who has it.
+  const me = session?.user.id ?? '';
+  const mine = useMemo(() => {
+    if (!data.teams.length) return { actions: data.actions, goals: data.goals };
+    const t = { members: data.teamMembers, roles: data.teamRoles, memberRoles: data.teamMemberRoles };
+    const actions = data.actions.filter((a) => isMine(a, data.goals, me, t));
+    const goals = data.goals.filter((g) => !g.team_id || g.user_id === me || actions.some((a) => a.goal_id === g.id));
+    return { actions, goals };
+  }, [data.actions, data.goals, data.teams, data.teamMembers, data.teamRoles, data.teamMemberRoles, me]);
+
   return useMemo(() => ({
     session, authReady, loading, online, pending, lastSynced, syncError, ...data, lastOrganized, setLastOrganized,
+    actions: mine.actions, allActions: data.actions, myGoals: mine.goals, me,
+    createTeam, renameTeam, saveTeamRole, deleteTeamRole, setMemberRoles, updateMember, removeMember, createInvite, revokeInvite, inviteInfo, acceptInvite,
     refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture, updateAccomplishment, deleteAccomplishment,
     createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge, upsertLifeArea, deleteLifeArea,
     updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
     dismissHandoff, chatConnections, revokeChat, saveCheckin, pinForTomorrow,
     organizePreview, organizeApply, organizeUndo,
     emailProviders, emailConnect, emailConnectImap, emailDisconnect, updateEmailAccount, emailSync, emailRefreshDigest, emailThread, emailModify,
-  }), [session, authReady, loading, online, pending, lastSynced, syncError, data, lastOrganized, refresh, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
+  }), [session, authReady, loading, online, pending, lastSynced, syncError, data, mine, me, lastOrganized, refresh,
+    createTeam, renameTeam, saveTeamRole, deleteTeamRole, setMemberRoles, updateMember, removeMember, createInvite, revokeInvite, inviteInfo, acceptInvite, completeAction, uncompleteAction, recordAccomplishment, commitCapture,
     updateAccomplishment, deleteAccomplishment, createAction, createSteps, updateAction, createGoal, updateGoal, giveFeedback, respondNudge,
     upsertLifeArea, deleteLifeArea, updateProfile, updateAccountability, updateNotifications, signOut, deleteAllData,
     dismissHandoff, chatConnections, revokeChat, saveCheckin, pinForTomorrow,

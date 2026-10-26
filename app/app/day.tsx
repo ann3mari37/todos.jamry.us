@@ -217,7 +217,7 @@ function EndDay() {
   // Tomorrow's first thing: leftovers moved to tomorrow first, then the best suggestions.
   const options = useMemo(() => {
     const moved = leftovers.filter((a) => decided[a.id] === 'tomorrow');
-    const recs = recommend({ goals: store.goals, actions: store.actions, dependencies: store.dependencies, lifeAreas: store.lifeAreas })
+    const recs = recommend({ goals: store.myGoals, actions: store.actions, dependencies: store.dependencies, lifeAreas: store.lifeAreas })
       .map((r) => r.action).filter((a): a is Action => !!a && !moved.some((m) => m.id === a.id));
     return [...moved, ...recs].slice(0, 5);
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps

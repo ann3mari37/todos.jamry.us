@@ -44,6 +44,10 @@ export interface Goal {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Who created it (the owner). */
+  user_id?: string;
+  /** Set when the project belongs to a team: every member sees it. */
+  team_id?: string | null;
 }
 
 export interface Action {
@@ -70,7 +74,20 @@ export interface Action {
   snoozed_until?: string | null;
   /** Last looked at in a tidy-up; restarts the "sitting a while" clock. */
   reviewed_at?: string | null;
+  /** Who created it. */
+  user_id?: string;
+  /** Team projects: the person doing it, or (until someone takes it) the role it needs. */
+  assignee_id?: string | null;
+  assigned_role_id?: string | null;
+  /** Who checked it off (shared on team projects). */
+  completed_by?: string | null;
 }
+
+export interface Team { id: string; name: string; created_by: string; created_at: string }
+export interface TeamMember { team_id: string; user_id: string; display_name: string; is_admin: boolean; joined_at: string }
+export interface TeamRole { id: string; team_id: string; name: string; description: string | null }
+export interface TeamMemberRole { team_id: string; user_id: string; role_id: string }
+export interface TeamInvite { id: string; team_id: string; code: string; name: string | null; role_id: string | null; accepted_at: string | null; expires_at: string; created_at: string }
 
 export interface Accomplishment {
   id: string;

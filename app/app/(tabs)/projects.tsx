@@ -58,6 +58,7 @@ export default function Todos() {
   const [note, setNote] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   const open = useOpenTasks();
+  const everyone = useOpenTasks(undefined, true);
   const inactivity = store.accountability?.inactivity_days ?? 10;
 
   const areaOf = (a: Action) => a.life_area_id ?? store.goals.find((g) => g.id === a.goal_id)?.life_area_id ?? null;
@@ -112,11 +113,11 @@ export default function Todos() {
       {view === 'projects' && (
         <>
           {projects.map((g) => {
-            const { done, total } = goalProgress(g.id, store.actions);
+            const { done, total } = goalProgress(g.id, store.allActions);
             const area = store.lifeAreas.find((x) => x.id === g.life_area_id);
-            const health = g.status === 'active' ? projectHealth(g, store.actions, new Date(), inactivity) : null;
+            const health = g.status === 'active' ? projectHealth(g, store.allActions, new Date(), inactivity) : null;
             const healthColor = health?.tone === 'warn' ? '#B7791F' : health?.tone === 'good' ? colors.teal : '#7A5FB8';
-            const steps = open.filter((a) => a.goal_id === g.id);
+            const steps = everyone.filter((a) => a.goal_id === g.id);
             return (
               <Card key={g.id} style={{ marginTop: 12 }}>
                 <Pressable onPress={() => router.push({ pathname: '/project/[id]', params: { id: g.id } })} accessibilityRole="button" accessibilityLabel={`Open ${g.title}`}>

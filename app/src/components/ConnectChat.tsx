@@ -57,7 +57,7 @@ async function copy(text: string): Promise<boolean> {
   return false;
 }
 
-function CopyBox({ text, label }: { text: string; label: string }) {
+export function CopyBox({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
   return (
     <Pressable

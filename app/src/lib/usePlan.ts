@@ -89,9 +89,9 @@ export function usePlan() {
 
   const compute = useCallback((mode: DailyMode | null, exclude: string[] = [], onlyKind: RecommendationKind | null = null): Recommendation[] =>
     recommend({
-      goals: store.goals, actions: store.actions, dependencies: store.dependencies, feedback: store.feedback,
+      goals: store.myGoals, actions: store.actions, dependencies: store.dependencies, feedback: store.feedback,
       mode, onlyKind, excludeActionIds: exclude, inactivityDays: store.accountability?.inactivity_days, lifeAreas: store.lifeAreas,
-    }), [store.goals, store.actions, store.dependencies, store.feedback, store.accountability, store.lifeAreas]);
+    }), [store.myGoals, store.actions, store.dependencies, store.feedback, store.accountability, store.lifeAreas]);
 
   const toPick = (r: Recommendation): Pick => ({ kind: r.kind, action_id: r.action?.id ?? null, goal_id: r.goal?.id ?? null, reason: r.reason });
 

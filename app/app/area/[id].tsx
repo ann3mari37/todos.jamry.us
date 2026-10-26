@@ -43,7 +43,7 @@ export default function Area() {
       </Muted>
 
       {projects.map((g) => {
-        const { done, total } = goalProgress(g.id, store.actions);
+        const { done, total } = goalProgress(g.id, store.allActions);
         return (
           <Card key={g.id} onPress={() => router.push({ pathname: '/project/[id]', params: { id: g.id } })} accessibilityLabel={`${g.title}, ${done} of ${total} steps`}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>

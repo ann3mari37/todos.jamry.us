@@ -22,7 +22,7 @@ export default function Celebrate() {
   const [reduceMotion, setReduceMotion] = useState(true);
   useEffect(() => { AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => setReduceMotion(true)); }, []);
 
-  const action = store.actions.find((a) => a.id === actionId);
+  const action = store.allActions.find((a) => a.id === actionId);
   const goal = store.goals.find((g) => g.id === (goalId ?? action?.goal_id));
   const n = Number(count ?? 0);
   const subtitle = goalId && goal ? `${goal.title} is complete. What a milestone.`
