@@ -3,7 +3,7 @@
 
 import { z } from 'zod';
 import type { CaptureItem, CommitItem } from './ai-contracts';
-import { estimateMinutes, guessLifeArea, matchProject, parseDue, stripDue, suggestWhy, type AreaLike } from './rules';
+import { statedMinutes, guessLifeArea, matchProject, parseDue, stripDue, suggestWhy, type AreaLike } from './rules';
 import { suggestSteps } from './templates';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -61,7 +61,8 @@ function findProject(ref: string | undefined, goals: GoalLike[]): string | null 
 
 /**
  * Turns what the chat sent into capture items using the same rules as typing into Momentum: the chat's own choices win,
- * and the rules fill the gaps (dates in the title, minutes, life area, project, starter steps, why it matters).
+ * and the rules fill the gaps (dates in the title, life area, project, starter steps, why it matters). Minutes are only
+ * what the chat or the title states: word-based guesses run far short for real work ("Build the review form": 15).
  */
 export function handoffToDrafts(items: HandoffItem[], areas: AreaLike[], goals: GoalLike[], now: Date = new Date()): HandoffDraft[] {
   return items.map((it) => {
@@ -74,14 +75,14 @@ export function handoffToDrafts(items: HandoffItem[], areas: AreaLike[], goals: 
     const areaId = goalId ? null : findArea(it.area, areas) ?? guessLifeArea(`${title} ${it.why ?? ''}`, areas);
     const areaName = areas.find((a) => a.id === areaId)?.name ?? null;
     const steps = kind !== 'goal' ? []
-      : it.steps?.length ? it.steps.map((s) => ({ title: s.title, estimated_minutes: s.minutes ?? estimateMinutes(s.title) }))
+      : it.steps?.length ? it.steps.map((s) => ({ title: s.title, estimated_minutes: s.minutes ?? statedMinutes(s.title) }))
       : suggestSteps(title).steps.slice(0, 3).map((s) => ({ title: s.title, estimated_minutes: s.minutes }));
     const meaning = kind === 'goal' ? (it.why || suggestWhy(title, { isProject: true, areaName }) || '') : (it.why ?? '');
     return {
       kind,
       title,
       source_excerpt: (it.why ? `${it.title} (${it.why})` : it.title).slice(0, 500),
-      estimated_minutes: kind === 'action' ? it.minutes ?? estimateMinutes(title) : null,
+      estimated_minutes: kind === 'action' ? it.minutes ?? statedMinutes(title) : null,
       suggested_goal_id: goalId,
       suggested_life_area_id: areaId,
       possible_duplicate_of: null,

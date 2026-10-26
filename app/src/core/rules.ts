@@ -92,10 +92,16 @@ const MINUTE_RULES: [RegExp, number][] = [
   [/\b(meeting|appointment|class|lesson|doctor|dentist)\b/i, 60],
 ];
 
+/** Minutes written in the title itself ("call mom 10 min"), or null. */
+export function statedMinutes(title: string): number | null {
+  const explicit = title.match(/\b(\d{1,3})\s*(min|mins|minutes|hr|hrs|hour|hours)\b/i);
+  return explicit ? Math.min(600, Number(explicit[1]) * (/^h/i.test(explicit[2]) ? 60 : 1)) : null;
+}
+
 /** Rough minutes for a single action, or null when the words don't say. */
 export function estimateMinutes(title: string): number | null {
-  const explicit = title.match(/\b(\d{1,3})\s*(min|mins|minutes|hr|hrs|hour|hours)\b/i);
-  if (explicit) return Math.min(600, Number(explicit[1]) * (/^h/i.test(explicit[2]) ? 60 : 1));
+  const stated = statedMinutes(title);
+  if (stated !== null) return stated;
   for (const [re, minutes] of MINUTE_RULES) if (re.test(title)) return minutes;
   return null;
 }

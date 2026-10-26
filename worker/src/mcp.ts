@@ -148,21 +148,21 @@ const TOOLS = [
   {
     name: 'add_task',
     title: 'Add a task now',
-    description: 'Adds one task straight to their list, without review. Use only when they clearly ask to add something specific ("add call the dentist tomorrow"); for plans use send_plan.',
+    description: 'Adds one task straight to their list, without review. Use only when they clearly ask to add something specific ("add call the dentist tomorrow"); for plans use send_plan. A task added to a project goes after its existing steps. Give minutes when you know the size of the work; otherwise leave it out rather than guess.',
     inputSchema: { type: 'object', required: ['title'], properties: taskProps },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: 'create_project',
     title: 'Start a project now',
-    description: 'Creates one project with its first steps straight away, without review. Leave out steps to get Momentum’s starter steps for that kind of project. Use only when they clearly ask; for plans use send_plan.',
+    description: 'Creates one project with its first steps straight away, without review. Leave out steps to get Momentum’s starter steps for that kind of project. Steps keep the order you give; put all of a project’s steps here (up to 5) and add later ones with add_task, which appends them. Use only when they clearly ask; for plans use send_plan.',
     inputSchema: { type: 'object', required: ['title'], properties: { title: taskProps.title, why: taskProps.why, due_date: taskProps.due_date, hard_deadline: taskProps.hard_deadline, area: taskProps.area, steps: taskProps.steps } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: 'update_task',
     title: 'Change a task',
-    description: 'Moves a task to another life area or project, changes its date, or marks it as waiting on someone. Use task ids from get_overview.',
+    description: 'Changes a task: its title, life area, project, date, estimated minutes, its place among its project’s steps, or whether it is waiting on someone. Use task ids from get_overview (each project lists its open steps in order). To put a project’s steps in order, call this with position for each step that is out of place.',
     inputSchema: {
       type: 'object',
       required: ['id'],
@@ -174,6 +174,8 @@ const TOOLS = [
         due_date: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear' },
         hard_deadline: { type: 'boolean' },
         waiting: { type: 'boolean', description: 'true = waiting on someone else; false = ready to do' },
+        minutes: { type: ['integer', 'null'], minimum: 1, maximum: 600, description: 'Estimated minutes, or null to clear a wrong estimate' },
+        position: { type: 'integer', minimum: 1, description: "Where it goes among its project's open steps: 1 = first. Larger than the number of steps = last." },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -247,6 +249,8 @@ const UpdateInput = z.object({
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   hard_deadline: z.boolean().optional(),
   waiting: z.boolean().optional(),
+  minutes: z.number().int().min(1).max(600).nullable().optional(),
+  position: z.number().int().min(1).optional(),
 });
 const PlanInput = z.object({ summary: z.string().trim().max(2000).default(''), items: z.array(HandoffItem).min(1).max(20) });
 const IdInput = z.object({ id: z.string().uuid() });
@@ -278,7 +282,7 @@ async function overview(ctx: Ctx) {
         id: g.id, title: g.title, status: g.status, area: areaName(areas, g.life_area_id), why: g.meaning,
         health: g.status === 'active' ? (({ label, message }) => ({ label, message }))(projectHealth(g, actions)) : null,
         due: g.deadline ? `${g.deadline}${g.deadline_type === 'hard' ? ' (hard deadline)' : ''}` : null,
-        open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 8).map((a) => ({ id: a.id, title: a.title, minutes: a.estimated_minutes, waiting: a.status === 'waiting' })),
+        open_steps: steps.filter((a) => OPEN.includes(a.status)).slice(0, 30).map((a) => ({ id: a.id, title: a.title, minutes: a.estimated_minutes, waiting: a.status === 'waiting' })),
         last_progress: g.last_meaningful_progress_at?.slice(0, 10) ?? null,
       };
     }),
@@ -412,9 +416,23 @@ async function updateTask(ctx: Ctx, input: z.infer<typeof UpdateInput>) {
     p.deadline_type = input.due_date ? (input.hard_deadline ? 'hard' : 'target') : 'none';
   } else if (input.hard_deadline !== undefined && task.due_date) p.deadline_type = input.hard_deadline ? 'hard' : 'target';
   if (input.waiting !== undefined) p.status = input.waiting ? 'waiting' : 'ready';
-  if (!Object.keys(p).length) throw new ToolError('Nothing to change.');
-  await must(ctx.db.from('actions').update(p).eq('id', task.id).select('id'));
-  return { status: 'updated', id: task.id, changed: Object.keys(p).filter((k) => k !== 'user_edited') };
+  if (input.minutes !== undefined) p.estimated_minutes = input.minutes;
+  if (!Object.keys(p).length && input.position === undefined) throw new ToolError('Nothing to change.');
+  if (Object.keys(p).length) await must(ctx.db.from('actions').update(p).eq('id', task.id).select('id'));
+  const changed = Object.keys(p).filter((k) => k !== 'user_edited');
+  if (input.position !== undefined) {
+    const goalId = (p.goal_id as string | null | undefined) === undefined ? task.goal_id : (p.goal_id as string | null);
+    if (!goalId) throw new ToolError('Only tasks in a project have a position. Set project first.');
+    // Renumber the project's open steps with this one in its new place (done steps keep their numbers below).
+    const steps = actions.filter((a) => a.goal_id === goalId && a.id !== task.id);
+    steps.splice(Math.min(input.position, steps.length + 1) - 1, 0, task);
+    const done = await must(ctx.db.from('actions').select('sort_order').eq('goal_id', goalId).eq('status', 'done').order('sort_order', { ascending: false }).limit(1)) as { sort_order: number }[];
+    const base = (done[0]?.sort_order ?? -1) + 1;
+    await Promise.all(steps.map((a, i) => a.sort_order === base + i && a.id !== task.id ? null : must(ctx.db.from('actions').update({ sort_order: base + i }).eq('id', a.id).select('id'))));
+    changed.push('position');
+    return { status: 'updated', id: task.id, changed, project_steps_in_order: steps.map((a) => a.title) };
+  }
+  return { status: 'updated', id: task.id, changed };
 }
 
 async function completeTask(ctx: Ctx, id: string) {
