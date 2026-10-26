@@ -1,6 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInboxBriefing } from '../../src/components/EmailBits';
 import { useStore } from '../../src/lib/store';
 import { colors, fonts } from '../../src/theme';
@@ -17,6 +18,8 @@ export default function TabsLayout() {
   const { session, authReady, emailAccounts } = useStore();
   // The Inbox tab's badge: how many emails need you first (the same list the Inbox shows).
   const needYou = useInboxBriefing().list.length;
+  // The bar's height includes the bottom inset (the home-indicator strip), so phones without one get a compact bar.
+  const { bottom } = useSafeAreaInsets();
   if (authReady && !session) return <Redirect href="/welcome" />;
   return (
     <Tabs
@@ -24,7 +27,7 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.pink,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border, height: 84, paddingTop: 8 },
+        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border, height: 58 + bottom, paddingTop: 6 },
         tabBarLabelStyle: { fontFamily: fonts.medium, fontSize: 11 },
       }}
     >

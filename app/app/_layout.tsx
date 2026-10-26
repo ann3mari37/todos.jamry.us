@@ -4,8 +4,8 @@ import { useFonts } from 'expo-font';
 import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
+import { SafeAreaInsetsContext, SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAutoUpdate } from '../src/components/SyncStatus';
 import { StoreProvider } from '../src/lib/store';
 import { colors } from '../src/theme';
@@ -34,12 +34,30 @@ export default function RootLayout() {
   }
   return (
     <SafeAreaProvider>
-      <StoreProvider>
-        <StatusBar style="dark" />
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
-          <Stack.Screen name="celebrate" options={{ presentation: 'modal', animation: 'fade' }} />
-        </Stack>
-      </StoreProvider>
+      <SaneInsets>
+        <StoreProvider>
+          <StatusBar style="dark" />
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+            <Stack.Screen name="celebrate" options={{ presentation: 'modal', animation: 'fade' }} />
+          </Stack>
+        </StoreProvider>
+      </SaneInsets>
     </SafeAreaProvider>
   );
+}
+
+// Mobile browsers sometimes report a huge safe-area inset (seen on an iPhone: ~260px at the bottom, which swelled the
+// tab bar to half the screen). No real device needs more than these, so on the web every screen gets capped insets.
+const MAX_INSETS = { top: 59, bottom: 34, left: 48, right: 48 };
+
+function SaneInsets({ children }: { children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  const capped = React.useMemo(() => ({
+    top: Math.min(insets.top, MAX_INSETS.top),
+    bottom: Math.min(insets.bottom, MAX_INSETS.bottom),
+    left: Math.min(insets.left, MAX_INSETS.left),
+    right: Math.min(insets.right, MAX_INSETS.right),
+  }), [insets.top, insets.bottom, insets.left, insets.right]);
+  if (Platform.OS !== 'web') return <>{children}</>;
+  return <SafeAreaInsetsContext.Provider value={capped}>{children}</SafeAreaInsetsContext.Provider>;
 }
