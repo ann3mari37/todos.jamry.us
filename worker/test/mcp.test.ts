@@ -90,7 +90,7 @@ describe('MCP connector', () => {
     const inserts = supabase();
     const out = await call({
       jsonrpc: '2.0', id: 5, method: 'tools/call',
-      params: { name: 'send_plan', arguments: { summary: 'Moving prep', items: [
+      params: { name: 'send_plan', arguments: { summary: 'Getting ready for the move on the 15th: a few errands and the trip.', items: [
         { kind: 'task', title: 'Book a dentist cleaning' },
         { kind: 'task', title: 'Pack the kitchen', project: 'move' },
         { kind: 'project', title: 'Plan a trip to Portland', area: 'home' },
@@ -120,14 +120,29 @@ describe('MCP connector', () => {
     }));
     const park = await call({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'park_project', arguments: { id: MOVE, revisit_when: 'after the lease is signed' } } });
     expect(park.result.isError).toBeUndefined();
-    const unpack = await call({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'update_project', arguments: { id: MOVE, status: 'active' } } });
+    const unpack = await call({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'update_project', arguments: { id: MOVE, status: 'active', summary: 'Moving into the new apartment on the 15th; the lease is signed, so packing starts now.' } } });
     expect(unpack.result.isError).toBeUndefined();
     const writes = calls.filter((c) => c.method !== 'GET' && c.method !== 'HEAD');
     expect(writes.every((c) => c.method === 'PATCH' && c.url.includes('/rest/v1/goals'))).toBe(true);
     expect(writes.map((c) => c.body)).toEqual([
       { status: 'parked', revisit_on: null, revisit_when: 'after the lease is signed' },
-      { status: 'active' },
+      { description: 'Moving into the new apartment on the 15th; the lease is signed, so packing starts now.', status: 'active' },
     ]);
+  });
+
+  it('requires a project summary and notes on what a chat adds, and says what to include', async () => {
+    supabase();
+    const noNotes = await call({ jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'add_task', arguments: { title: 'Call the landlord' } } });
+    expect(noNotes.result.isError).toBe(true);
+    expect(noNotes.result.content[0].text).toMatch(/notes are required/);
+    const noSummary = await call({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'create_project', arguments: { title: 'Group coaching', steps: [{ title: 'Pick a date', notes: 'Check the calendar for a free Tuesday evening' }] } } });
+    expect(noSummary.result.isError).toBe(true);
+    expect(noSummary.result.content[0].text).toMatch(/summary is required/);
+    const bareStep = await call({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'create_project', arguments: { title: 'Group coaching', summary: 'A six-week group program for past clients, starting in January.', steps: [{ title: 'Pick a date' }] } } });
+    expect(bareStep.result.isError).toBe(true);
+    expect(bareStep.result.content[0].text).toMatch(/step's notes are required/);
+    const noIdeaSummary = await call({ jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'park_project', arguments: { title: 'Podcast' } } });
+    expect(noIdeaSummary.result.isError).toBe(true);
   });
 
   it('returns fixable input problems as tool errors', async () => {

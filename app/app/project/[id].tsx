@@ -37,7 +37,7 @@ export default function Project() {
   const store = useStore();
   const goal = store.goals.find((g) => g.id === id);
   const [tab, setTab] = useState<'overview' | 'steps' | 'notes' | 'files'>('overview');
-  const [sheet, setSheet] = useState<null | 'title' | 'meaning' | 'deadline' | 'area' | 'status' | 'accountability' | 'more' | 'add' | 'blockers' | 'team' | 'park'>(null);
+  const [sheet, setSheet] = useState<null | 'title' | 'meaning' | 'deadline' | 'area' | 'status' | 'accountability' | 'more' | 'add' | 'blockers' | 'team' | 'park' | 'summary'>(null);
   const [editAction, setEditAction] = useState<Action | null>(null);
   const [genBusy, setGenBusy] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
@@ -182,6 +182,18 @@ export default function Project() {
       <Pressable onPress={() => setSheet('title')} accessibilityRole="button" accessibilityHint="Edit title">
         <H1>{goal.title}</H1>
       </Pressable>
+      {goal.description ? (
+        <Pressable onPress={() => setSheet('summary')} accessibilityRole="button" accessibilityLabel="Edit the project summary">
+          <Card style={{ marginTop: 10 }}>
+            <Muted style={{ fontFamily: fonts.medium, color: colors.text, marginBottom: 4 }}>Summary</Muted>
+            <Body>{goal.description}</Body>
+          </Card>
+        </Pressable>
+      ) : (
+        <Pressable onPress={() => setSheet('summary')} accessibilityRole="button" style={{ alignSelf: 'flex-start', marginTop: 8 }}>
+          <Muted style={{ color: colors.pinkDeep, fontFamily: fonts.medium }}>+ Add a summary for anyone who opens this</Muted>
+        </Pressable>
+      )}
       {goal.status === 'parked' && (
         <Card style={{ marginTop: 10, backgroundColor: colors.pinkWash, borderColor: colors.pinkSoft }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -315,6 +327,7 @@ export default function Project() {
         </View>
       </Sheet>
       <ParkSheet visible={sheet === 'park'} goal={goal} onClose={() => setSheet(null)} />
+      <TextSheet visible={sheet === 'summary'} title="Project summary" initial={goal.description ?? ''} multiline placeholder="What this is, why it matters, where it stands, and any decisions." onClose={() => setSheet(null)} onSave={(v) => update({ description: v || null })} />
       <Sheet visible={sheet === 'team'} onClose={() => setSheet(null)} title="Shared with">
         <Muted style={{ marginBottom: 10 }}>This project was shared when one of its steps went to a teammate, so they can see and finish their part. Your life areas and history stay private.</Muted>
         <SheetOption icon={!goal.team_id ? 'check-circle' : 'circle'} label="Stop sharing (just you)" onPress={() => { update({ team_id: null }); setSheet(null); }} />

@@ -85,6 +85,7 @@ export function ParkedSection() {
           {parked.map((g) => (
             <Card key={g.id} style={{ marginBottom: 8 }} onPress={() => router.push({ pathname: '/project/[id]', params: { id: g.id } })} accessibilityLabel={`Open ${g.title}`}>
               <Body style={{ fontFamily: fonts.medium }}>{g.title}</Body>
+              {g.description && <Muted style={{ marginTop: 2 }} numberOfLines={2}>{g.description}</Muted>}
               <Muted style={{ marginTop: 2 }}>{revisitLabel(g)}</Muted>
             </Card>
           ))}
