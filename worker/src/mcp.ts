@@ -239,6 +239,9 @@ const INSTRUCTIONS = [
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
 
+// Some chat apps send numbers as text ("3", "null") when their copy of the tool list is out of date.
+const numberish = (v: unknown) => v === 'null' ? null : typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : v;
+
 // ───────────────────────── tool handlers
 
 const UpdateInput = z.object({
@@ -249,8 +252,8 @@ const UpdateInput = z.object({
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   hard_deadline: z.boolean().optional(),
   waiting: z.boolean().optional(),
-  minutes: z.number().int().min(1).max(600).nullable().optional(),
-  position: z.number().int().min(1).optional(),
+  minutes: z.preprocess(numberish, z.number().int().min(1).max(600).nullable().optional()),
+  position: z.preprocess(numberish, z.number().int().min(1).optional()),
 });
 const PlanInput = z.object({ summary: z.string().trim().max(2000).default(''), items: z.array(HandoffItem).min(1).max(20) });
 const IdInput = z.object({ id: z.string().uuid() });
