@@ -256,7 +256,7 @@ const INSTRUCTIONS = [
   'Use add_task / create_project only for a single thing they clearly asked to add now.',
   'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
   'Email: for "what is in my email" or "what should I answer first", call get_inbox, read the threads that matter with read_email_thread, then save_email_briefing with a cohesive paragraph and a ranked do_first list, and tell them the same. Offer send_plan (with from_email) to turn emails into tasks. Archive or label only when asked.',
-  'Keep their lists true to the plan: when you learn a step’s real size, a date moving, or a better order, fix it with update_task (minutes, due_date, position, notes) or update_project (due_date, add_note). Put specifics (links, who to call, decisions) in a task's notes, its details section, and tell them what you changed. Steps you add later go to the end of their project, so set position when they belong earlier.',
+  'Keep their lists true to the plan: when you learn a step’s real size, a date moving, or a better order, fix it with update_task (minutes, due_date, position, notes) or update_project (due_date, add_note). Put specifics (links, who to call, decisions) in a task’s notes, its details section, and tell them what you changed. Steps you add later go to the end of their project, so set position when they belong earlier.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
 
