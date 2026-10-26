@@ -35,10 +35,13 @@ const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) 
   new Response(body === null ? null : JSON.stringify(body), { status, headers: { ...MCP_CORS, ...extra, ...(body === null ? {} : { 'Content-Type': 'application/json' }) } });
 
 /** OAuth protected-resource metadata (RFC 9728): tells the chat where to sign the user in. */
-export function protectedResourceMetadata(env: Env): Response {
+// Supabase sends every sign-in to its one Site URL (todos.jamry.us). Other sites serving this app
+// (dashboard.malindaperryconsulting.com) present themselves as the sign-in server instead: the same Supabase endpoints,
+// except the first step, which goes through `/api/oauth/authorize` here so the person signs in on the site they connected.
+export function protectedResourceMetadata(env: Env, ownSignIn = false): Response {
   return reply({
     resource: `${origin(env)}/api/mcp`,
-    authorization_servers: [`${env.SUPABASE_URL}/auth/v1`],
+    authorization_servers: [ownSignIn ? origin(env) : `${env.SUPABASE_URL}/auth/v1`],
     bearer_methods_supported: ['header'],
     resource_name: 'Momentum',
     resource_documentation: `${origin(env)}/connect`,
@@ -46,10 +49,27 @@ export function protectedResourceMetadata(env: Env): Response {
 }
 
 /** Older MCP clients look for authorization-server metadata on this host; pass Supabase's through. */
-export async function authorizationServerMetadata(env: Env): Promise<Response> {
+export async function authorizationServerMetadata(env: Env, ownSignIn = false): Promise<Response> {
   const res = await fetch(`${env.SUPABASE_URL}/.well-known/oauth-authorization-server/auth/v1`);
   if (!res.ok) return reply({ error: 'oauth_server_unavailable' }, 502);
-  return reply(await res.json(), 200, { 'Cache-Control': 'public, max-age=3600' });
+  const meta = await res.json() as Record<string, unknown>;
+  if (ownSignIn) Object.assign(meta, { issuer: origin(env), authorization_endpoint: `${origin(env)}/api/oauth/authorize` });
+  return reply(meta, 200, { 'Cache-Control': 'public, max-age=3600' });
+}
+
+/**
+ * First step of the chat sign-in on a non-primary site: let Supabase start the authorization (it needs no session for
+ * that), then send the browser to this site's consent page instead of the Site URL's.
+ */
+export async function authorize(req: Request, env: Env): Promise<Response> {
+  const query = new URL(req.url).search;
+  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/oauth/authorize${query}`, { redirect: 'manual' });
+  const location = res.headers.get('Location');
+  if (!location) return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'text/plain' } });
+  const next = new URL(location, env.SUPABASE_URL);
+  // Only the hop to the consent page moves; errors sent back to the chat's redirect_uri pass through untouched.
+  const target = next.pathname === '/oauth/consent' ? `${origin(env)}${next.pathname}${next.search}` : next.toString();
+  return new Response(null, { status: 302, headers: { Location: target, 'Cache-Control': 'no-store' } });
 }
 
 // ───────────────────────── tool definitions (JSON Schema for the chat, zod for us)

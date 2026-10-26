@@ -5,7 +5,7 @@ import { availableProviders, connectImap, disconnect, finishOAuth, startOAuth } 
 import * as email from './email/service';
 import type { Env } from './env';
 import { enforceLimits, transcribe } from './ai';
-import { authorizationServerMetadata, handleMcp, MCP_CORS, protectedResourceMetadata } from './mcp';
+import { authorizationServerMetadata, authorize, handleMcp, MCP_CORS, protectedResourceMetadata } from './mcp';
 import * as ops from './ops';
 import * as organize from './organize';
 import { authenticate, HttpError } from './supabase';
@@ -138,10 +138,13 @@ export default {
     const { pathname: path } = new URL(req.url);
     // The AI-chat connector (MCP) and its sign-in discovery documents. Open CORS: they use bearer tokens, never cookies.
     if (path === '/api/mcp') return handleMcp(req, env);
+    // Sites other than the primary one run the chat sign-in through themselves (see protectedResourceMetadata).
+    const ownSignIn = env.APP_URL !== baseEnv.APP_URL;
+    if (path === '/api/oauth/authorize' && ownSignIn) return authorize(req, env);
     if (path.startsWith('/.well-known/oauth-')) {
       if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: MCP_CORS });
-      if (path.startsWith('/.well-known/oauth-protected-resource')) return protectedResourceMetadata(env);
-      if (path.startsWith('/.well-known/oauth-authorization-server')) return authorizationServerMetadata(env);
+      if (path.startsWith('/.well-known/oauth-protected-resource')) return protectedResourceMetadata(env, ownSignIn);
+      if (path.startsWith('/.well-known/oauth-authorization-server')) return authorizationServerMetadata(env, ownSignIn);
       return new Response('Not found', { status: 404, headers: MCP_CORS });
     }
     const headers = cors(req, env);
