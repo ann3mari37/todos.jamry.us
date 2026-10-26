@@ -275,7 +275,7 @@ const UpdateInput = z.object({
   waiting: z.boolean().optional(),
   minutes: z.preprocess(numberish, z.number().int().min(1).max(600).nullable().optional()),
   position: z.preprocess(numberish, z.number().int().min(1).optional()),
-  notes: z.string().max(4000).nullable().optional(),
+  notes: z.preprocess((v) => v === 'null' ? null : v, z.string().max(4000).nullable().optional()),
 });
 const ProjectUpdateInput = z.object({
   id: z.string().uuid(),
