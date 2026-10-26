@@ -56,14 +56,16 @@ export function SyncProblemBanner() {
 export function useAutoUpdate() {
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const loaded = [...document.scripts].map((s) => s.src).find((s) => /__common-[a-f0-9]+\.js/.test(s));
-    if (!loaded) return; // development build
+    // Every hashed bundle the page loaded (common, entry…): a change to a single screen only changes the entry's hash.
+    const BUNDLE = /[\w-]+-[a-f0-9]{16,}\.js/g;
+    const loaded = [...document.scripts].map((s) => s.src.match(BUNDLE)?.[0]).filter((s): s is string => !!s);
+    if (!loaded.length) return; // development build
     const check = async () => {
       try {
         const html = await (await fetch('/', { cache: 'no-store' })).text();
-        const latest = html.match(/__common-[a-f0-9]+\.js/)?.[0];
+        const latest = html.match(BUNDLE) ?? [];
         const typing = document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
-        if (latest && !loaded.includes(latest) && !typing) window.location.reload();
+        if (latest.length && latest.some((b) => !loaded.includes(b)) && !typing) window.location.reload();
       } catch { /* offline: try again later */ }
     };
     const onVisible = () => { if (document.visibilityState === 'visible') check(); };
