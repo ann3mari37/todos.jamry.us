@@ -220,11 +220,23 @@ export function Sheet({ visible, onClose, title, children }: { visible: boolean;
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={[{ flex: 1, justifyContent: 'flex-end' }, WEB_OVERLAY]}>
-        <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(43,39,48,0.28)' }]} onPress={onClose} accessibilityLabel="Close" />
+        {/* Tapping outside closes. Phone browsers (iPhone especially) don't always deliver the press to Pressable here,
+            so the web also gets a plain click handler. */}
+        <Pressable
+          style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(20,24,36,0.38)' }]}
+          onPress={onClose}
+          accessibilityLabel="Close"
+          {...(Platform.OS === 'web' ? ({ onClick: onClose } as object) : {})}
+        />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
-          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Math.max(insets.bottom, 12) + 20, maxHeight: Math.round(height * 0.88), width: '100%', maxWidth: 560, alignSelf: 'center' }}>
-            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 12 }} />
-            {title && <H2 style={{ marginBottom: 12 }}>{title}</H2>}
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Math.max(insets.bottom, 12) + 20, maxHeight: Math.round(height * 0.82), width: '100%', maxWidth: 560, alignSelf: 'center' }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 8 }} />
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+              <View style={{ flex: 1 }}>{title && <H2>{title}</H2>}</View>
+              <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={10} style={({ pressed }) => [{ width: 34, height: 34, borderRadius: 17, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }, pressed && { opacity: 0.6 }]}>
+                <Icon name="x" size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
             <ScrollView style={{ flexGrow: 0 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{children}</ScrollView>
           </View>
         </KeyboardAvoidingView>
