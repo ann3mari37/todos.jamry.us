@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { OrganizeSheet } from '../../src/components/OrganizeSheet';
+import { ParkedSection } from '../../src/components/ParkedBits';
 import { TaskList, useOpenTasks } from '../../src/components/TaskList';
 import { Body, Card, H1, Icon, IconButton, Muted, ProgressBar, Screen } from '../../src/components/ui';
 import { daysUntil, shortDate } from '../../src/core/dates';
@@ -167,6 +168,8 @@ export default function Todos() {
                 ))}
             </>
           )}
+
+          <ParkedSection />
 
           {finishedProjects.length > 0 && (
             <>

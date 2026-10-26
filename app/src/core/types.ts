@@ -1,6 +1,7 @@
 // Domain types shared by the app and the Cloudflare Worker.
 
-export type GoalStatus = 'active' | 'waiting' | 'blocked' | 'paused' | 'completed' | 'archived';
+/** parked = an idea not ready to unpack into steps yet (out of Today until revisited). */
+export type GoalStatus = 'active' | 'waiting' | 'blocked' | 'paused' | 'parked' | 'completed' | 'archived';
 export type ActionStatus =
   | 'suggested'
   | 'ready'
@@ -48,6 +49,9 @@ export interface Goal {
   user_id?: string;
   /** Set when the project belongs to a team: every member sees it. */
   team_id?: string | null;
+  /** Parked projects: when to bring it back up (YYYY-MM-DD), and/or what should prompt it. */
+  revisit_on?: string | null;
+  revisit_when?: string | null;
 }
 
 export interface Action {

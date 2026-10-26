@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
 import { ProjectBanner } from '../../src/components/FlowerArt';
 import { AssignChips } from '../../src/components/TeamBits';
+import { ParkSheet } from '../../src/components/ParkedBits';
+import { revisitLabel } from '../../src/core/parked';
 import { assigneeLabel } from '../../src/core/team';
 import { Banner, Body, Button, Card, Chip, Divider, Field, H1, Icon, IconButton, Muted, ProgressBar, Row, Screen, Segmented, Sheet, SheetOption } from '../../src/components/ui';
 import { friendlyDate, shortDate, timeOfDay } from '../../src/core/dates';
@@ -19,7 +21,7 @@ import { colors, fonts, radius } from '../../src/theme';
 
 const STATUSES: { value: GoalStatus; label: string }[] = [
   { value: 'active', label: 'Active' }, { value: 'waiting', label: 'Waiting on something' }, { value: 'blocked', label: 'Blocked' },
-  { value: 'paused', label: 'Paused' }, { value: 'completed', label: 'Completed' }, { value: 'archived', label: 'Archived' },
+  { value: 'paused', label: 'Paused' }, { value: 'parked', label: 'Parked (not ready to unpack)' }, { value: 'completed', label: 'Completed' }, { value: 'archived', label: 'Archived' },
 ];
 const ACCOUNTABILITY: { value: AccountabilityMode; label: string }[] = [
   { value: 'default', label: 'Default' }, { value: 'keep_visible', label: 'Keep this visible' }, { value: 'help_me', label: 'Help me make progress' },
@@ -35,7 +37,7 @@ export default function Project() {
   const store = useStore();
   const goal = store.goals.find((g) => g.id === id);
   const [tab, setTab] = useState<'overview' | 'steps' | 'notes' | 'files'>('overview');
-  const [sheet, setSheet] = useState<null | 'title' | 'meaning' | 'deadline' | 'area' | 'status' | 'accountability' | 'more' | 'add' | 'blockers' | 'team'>(null);
+  const [sheet, setSheet] = useState<null | 'title' | 'meaning' | 'deadline' | 'area' | 'status' | 'accountability' | 'more' | 'add' | 'blockers' | 'team' | 'park'>(null);
   const [editAction, setEditAction] = useState<Action | null>(null);
   const [genBusy, setGenBusy] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
@@ -180,6 +182,19 @@ export default function Project() {
       <Pressable onPress={() => setSheet('title')} accessibilityRole="button" accessibilityHint="Edit title">
         <H1>{goal.title}</H1>
       </Pressable>
+      {goal.status === 'parked' && (
+        <Card style={{ marginTop: 10, backgroundColor: colors.pinkWash, borderColor: colors.pinkSoft }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Icon name="archive" size={16} color={colors.pinkDeep} />
+            <Body style={{ flex: 1, fontFamily: fonts.medium }}>Parked · {revisitLabel(goal)}</Body>
+          </View>
+          <Muted style={{ marginTop: 4 }}>Out of Today and your lists. Jot what you know in Notes; your AI chat can help work it out.</Muted>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            <Chip label="Unpack it now" onPress={() => update({ status: 'active', revisit_on: null })} />
+            <Chip label="Change when it comes back" onPress={() => setSheet('park')} />
+          </View>
+        </Card>
+      )}
       <Pressable onPress={() => setSheet('meaning')}>
         <Muted style={{ fontSize: 15, marginTop: 4 }}>{goal.meaning || `Suggested: ${suggestedWhy}`}</Muted>
       </Pressable>
@@ -299,13 +314,14 @@ export default function Project() {
           {store.lifeAreas.filter((a) => !a.archived_at).map((a) => <Chip key={a.id} label={a.name} selected={goal.life_area_id === a.id} onPress={() => { update({ life_area_id: a.id }); setSheet(null); }} />)}
         </View>
       </Sheet>
+      <ParkSheet visible={sheet === 'park'} goal={goal} onClose={() => setSheet(null)} />
       <Sheet visible={sheet === 'team'} onClose={() => setSheet(null)} title="Shared with">
         <Muted style={{ marginBottom: 10 }}>This project was shared when one of its steps went to a teammate, so they can see and finish their part. Your life areas and history stay private.</Muted>
         <SheetOption icon={!goal.team_id ? 'check-circle' : 'circle'} label="Stop sharing (just you)" onPress={() => { update({ team_id: null }); setSheet(null); }} />
         {store.teams.map((t) => <SheetOption key={t.id} icon={goal.team_id === t.id ? 'check-circle' : 'circle'} label={t.name} onPress={() => { update({ team_id: t.id }); setSheet(null); }} />)}
       </Sheet>
       <Sheet visible={sheet === 'status'} onClose={() => setSheet(null)} title="Status">
-        {STATUSES.map((s) => <SheetOption key={s.value} icon={goal.status === s.value ? 'check-circle' : 'circle'} label={s.label} onPress={() => { update({ status: s.value }); setSheet(null); if (s.value === 'completed') router.push({ pathname: '/celebrate', params: { goal: goal.id } }); }} />)}
+        {STATUSES.map((s) => <SheetOption key={s.value} icon={goal.status === s.value ? 'check-circle' : 'circle'} label={s.label} onPress={() => { if (s.value === 'parked') { setSheet('park'); return; } update({ status: s.value, ...(s.value === 'active' && goal.status === 'parked' ? { revisit_on: null } : {}) }); setSheet(null); if (s.value === 'completed') router.push({ pathname: '/celebrate', params: { goal: goal.id } }); }} />)}
       </Sheet>
       <Sheet visible={sheet === 'accountability'} onClose={() => setSheet(null)} title="How should Momentum help with this?">
         {ACCOUNTABILITY.map((s) => <SheetOption key={s.value} icon={goal.accountability === s.value ? 'check-circle' : 'circle'} label={s.label} onPress={() => { update({ accountability: s.value }); setSheet(null); }} />)}
@@ -313,6 +329,7 @@ export default function Project() {
       <Sheet visible={sheet === 'more'} onClose={() => setSheet(null)}>
         <SheetOption icon="refresh-cw" label="Regenerate suggested steps" onPress={() => { setSheet(null); generate(true); }} />
         <SheetOption icon="help-circle" label="Help me find the blocker" onPress={findBlockers} />
+        {goal.status !== 'parked' && <SheetOption icon="archive" label="Park it (not ready to unpack yet)" onPress={() => setSheet('park')} />}
         <SheetOption icon="pause" label={goal.status === 'paused' ? 'Resume' : 'Pause'} onPress={() => { update({ status: goal.status === 'paused' ? 'active' : 'paused' }); setSheet(null); }} />
         <SheetOption icon="check-circle" label="Mark project complete" onPress={() => { update({ status: 'completed' }); setSheet(null); router.push({ pathname: '/celebrate', params: { goal: goal.id } }); }} />
         <SheetOption icon="archive" label="Archive (history is kept)" onPress={() => { update({ status: 'archived' }); setSheet(null); }} />

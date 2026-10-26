@@ -81,7 +81,7 @@ describe('MCP connector', () => {
     expect(odd.result.protocolVersion).toBe('2025-11-25');
     expect((await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' })).status).toBe(202);
     const list = await call({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(['get_overview', 'get_today', 'send_plan', 'add_task', 'create_project', 'update_task', 'update_project', 'complete_task', 'get_inbox', 'read_email_thread', 'save_email_briefing', 'email_action']);
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(['get_overview', 'get_today', 'send_plan', 'add_task', 'create_project', 'update_task', 'update_project', 'park_project', 'complete_task', 'get_inbox', 'read_email_thread', 'save_email_briefing', 'email_action']);
     const missing = await call({ jsonrpc: '2.0', id: 4, method: 'nope' });
     expect(missing.error.code).toBe(-32601);
   });
@@ -107,6 +107,27 @@ describe('MCP connector', () => {
     expect(trip).toMatchObject({ kind: 'goal', suggested_life_area_id: HOME });
     expect(trip.next_actions.length).toBeGreaterThan(0);
     expect(trip.meaning.length).toBeGreaterThan(0);
+  });
+
+  it('parks and unpacks a project in place: only its status and revisit info change, nothing is deleted or moved', async () => {
+    supabase();
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const base = fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/rest/v1/')) calls.push({ method: init?.method ?? 'GET', url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      return base(input, init);
+    }));
+    const park = await call({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'park_project', arguments: { id: MOVE, revisit_when: 'after the lease is signed' } } });
+    expect(park.result.isError).toBeUndefined();
+    const unpack = await call({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'update_project', arguments: { id: MOVE, status: 'active' } } });
+    expect(unpack.result.isError).toBeUndefined();
+    const writes = calls.filter((c) => c.method !== 'GET' && c.method !== 'HEAD');
+    expect(writes.every((c) => c.method === 'PATCH' && c.url.includes('/rest/v1/goals'))).toBe(true);
+    expect(writes.map((c) => c.body)).toEqual([
+      { status: 'parked', revisit_on: null, revisit_when: 'after the lease is signed' },
+      { status: 'active' },
+    ]);
   });
 
   it('returns fixable input problems as tool errors', async () => {

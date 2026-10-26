@@ -18,7 +18,7 @@ import { authenticate, HttpError } from './supabase';
 
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const OPEN: Action['status'][] = ['ready', 'in_progress', 'waiting', 'blocked'];
-const LIVE_GOALS: Goal['status'][] = ['active', 'waiting', 'blocked', 'paused'];
+const LIVE_GOALS: Goal['status'][] = ['active', 'waiting', 'blocked', 'paused', 'parked'];
 
 export const MCP_CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -207,6 +207,28 @@ const TOOLS = [
         hard_deadline: { type: 'boolean' },
         add_note: { type: 'string', maxLength: 4000, description: 'Adds a note to the project’s Notes tab (instructions, decisions, context)' },
         team: { type: 'string', maxLength: 80, description: 'Move the project onto a team (its name) or "none" to make it personal again. Only the project’s owner can.' },
+        status: { type: 'string', enum: ['active', 'parked'], description: 'active = unpack a parked project (then add its steps); parked = set it aside until it is ready' },
+        revisit_on: { type: ['string', 'null'], description: 'Parked projects: YYYY-MM-DD to bring it back up, or null' },
+        revisit_when: { type: ['string', 'null'], maxLength: 300, description: 'Parked projects: what should prompt it, e.g. "after the review system launches"' },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'park_project',
+    title: 'Park an idea or project',
+    description: 'Sets aside something that needs working out but is not ready to unpack into steps. With title: parks a new idea (no starter steps), with what you know as notes and any rough steps. With id: parks an existing project. It stays out of Today and their lists until its revisit date, or until revisit_when fits what they are planning. Unpack later with update_project status "active".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'An existing project to park (from get_overview)' },
+        title: { type: 'string', maxLength: 200, description: 'A new idea to park' },
+        why: { type: 'string', maxLength: 500 },
+        area: { type: 'string', maxLength: 60, description: 'Life area name' },
+        notes: { type: 'string', maxLength: 4000, description: 'What is known so far: questions, constraints, decisions, links' },
+        rough_steps: { type: 'array', maxItems: 10, items: { type: 'string', maxLength: 200 }, description: 'Possible steps, kept with the idea (hidden until it is unpacked)' },
+        revisit_on: { type: 'string', description: 'YYYY-MM-DD to bring it back up' },
+        revisit_when: { type: 'string', maxLength: 300, description: 'What should prompt it, e.g. "after the review system launches"' },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -268,6 +290,7 @@ const INSTRUCTIONS = [
   'The person may pin a "first thing" for the day (first_thing_today / first_thing_tomorrow). It is their choice: keep it first, never reorder or replace it, and only complete it when they say it is done.',
   'Email: for "what is in my email" or "what should I answer first", call get_inbox, read the threads that matter with read_email_thread, then save_email_briefing with a cohesive paragraph and a ranked do_first list, and tell them the same. Offer send_plan (with from_email) to turn emails into tasks. Archive or label only when asked.',
   'Teams: if get_overview lists teams, keep it light; they do not want to organize team projects. Leave their own steps alone and only set assignee on steps someone else should do: the person when it is clearly theirs, otherwise the role whose description fits (open to anyone holding it). That shares the project with the team automatically. When one of their steps cannot start until a teammate finishes something, set waits_for on it; it stays off their Today until then, and team_updates tells them when it is their turn. Use the exact names from teams; never invent people or roles, and if a role is missing, tell them to add it under Settings, Team.',
+  'Parking: when something needs thinking through but is not ready to become steps (or they say "not now", "someday", "park it"), use park_project with what you know as notes, any rough steps, and when to revisit (a date and/or a condition). Do not unpack it unasked. When planning, look at parked in get_overview: bring up ideas that are ready_to_revisit, or whose revisit_when or notes fit what they are working on now, and offer to work them out. Add what you learn with update_project add_note. When they are ready, unpack with update_project status "active" and add the real steps.',
   'Keep their lists true to the plan: when you learn a step’s real size, a date moving, or a better order, fix it with update_task (minutes, due_date, position, notes) or update_project (due_date, add_note). Put specifics (links, who to call, decisions) in a task’s notes, its details section, and tell them what you changed. Steps you add later go to the end of their project, so set position when they belong earlier.',
   'If get_overview shows a pile-up or tasks sitting a while, offer to help: order the real deadlines quickest-first, move flexible dates with update_task, or talk through whether old tasks still matter. Never remove anything without asking.',
 ].join(' ');
@@ -300,6 +323,19 @@ const ProjectUpdateInput = z.object({
   hard_deadline: z.boolean().optional(),
   add_note: z.string().trim().min(1).max(4000).optional(),
   team: z.string().trim().min(1).max(80).optional(),
+  status: z.enum(['active', 'parked']).optional(),
+  revisit_on: z.preprocess((v) => (v === 'null' ? null : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional()),
+  revisit_when: z.preprocess((v) => (v === 'null' ? null : v), z.string().trim().max(300).nullable().optional()),
+});
+const ParkInput = z.object({
+  id: z.string().uuid().optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  why: z.string().trim().max(500).optional(),
+  area: z.string().trim().max(60).optional(),
+  notes: z.string().trim().max(4000).optional(),
+  rough_steps: z.array(z.string().trim().min(1).max(200)).max(10).optional(),
+  revisit_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  revisit_when: z.string().trim().max(300).optional(),
 });
 const PlanInput = z.object({ summary: z.string().trim().max(2000).default(''), items: z.array(HandoffItem).min(1).max(20) });
 const IdInput = z.object({ id: z.string().uuid() });
@@ -349,6 +385,10 @@ async function overview(ctx: Ctx) {
   ]);
   const titleOf = (id: string) => [...actions, ...recentDone].find((a) => a.id === id)?.title ?? null;
   const waitsFor = (a: Action) => deps.filter((d) => d.action_id === a.id).map((d) => titleOf(d.depends_on_id) ?? 'a finished step');
+  // Parked ideas, with their notes, so the chat can help work them out and bring them up at the right time.
+  const parked = goals.filter((g) => g.status === 'parked');
+  const parkedNotes = parked.length ? await must(ctx.db.from('goal_context').select('goal_id,body,created_at').in('goal_id', parked.map((g) => g.id)).is('resolved_at', null).order('created_at', { ascending: false })) as { goal_id: string; body: string }[] : [];
+  const todayIso = new Date().toISOString().slice(0, 10);
   const updates = teams.length ? teamUpdates({ all: [...actions, ...recentDone], goals, dependencies: deps, me, team }) : null;
   return {
     ...pinned,
@@ -370,7 +410,15 @@ async function overview(ctx: Ctx) {
         roles: team.roles.filter((r) => r.team_id === t.id).map((r) => ({ name: r.name, does: r.description })),
       })),
     } : {}),
-    projects: goals.map((g) => {
+    ...(parked.length ? {
+      parked: parked.map((g) => ({
+        id: g.id, title: g.title, area: areaName(areas, g.life_area_id), why: g.meaning,
+        revisit_on: g.revisit_on ?? null, revisit_when: g.revisit_when ?? null, ready_to_revisit: !!g.revisit_on && g.revisit_on <= todayIso,
+        notes: parkedNotes.filter((n) => n.goal_id === g.id).slice(0, 5).map((n) => n.body.slice(0, 400)),
+        rough_steps: actions.filter((a) => a.goal_id === g.id && OPEN.includes(a.status)).map((a) => a.title),
+      })),
+    } : {}),
+    projects: goals.filter((g) => g.status !== 'parked').map((g) => {
       const steps = actions.filter((a) => a.goal_id === g.id);
       return {
         id: g.id, title: g.title, status: g.status, area: areaName(areas, g.life_area_id), why: g.meaning,
@@ -454,7 +502,7 @@ async function today(ctx: Ctx) {
 
 async function sendPlan(ctx: Ctx, input: z.infer<typeof PlanInput>, client: string | null) {
   const { areas, goals } = await load(ctx);
-  const items = handoffToDrafts(input.items, areas, goals.filter((g) => g.status !== 'paused'));
+  const items = handoffToDrafts(input.items, areas, goals.filter((g) => g.status !== 'paused' && g.status !== 'parked'));
   const interpretation: HandoffInterpretation = { version: 1, summary: input.summary, client, items };
   const raw = input.summary || input.items.map((i) => i.title).join('; ');
   const row = (await must(ctx.db.from('capture_entries').insert({ raw_text: raw.slice(0, 8000), source: 'chat', status: 'interpreted', interpretation }).select('id').single())) as { id: string };
@@ -472,7 +520,7 @@ async function sendPlan(ctx: Ctx, input: z.infer<typeof PlanInput>, client: stri
 
 async function addNow(ctx: Ctx, item: HandoffItem) {
   const { areas, goals } = await load(ctx);
-  const [draft] = handoffToDrafts([item], areas, goals.filter((g) => g.status !== 'paused'));
+  const [draft] = handoffToDrafts([item], areas, goals.filter((g) => g.status !== 'paused' && g.status !== 'parked'));
   const items = draftsToCommit([{ ...draft, client_id: crypto.randomUUID() }]);
   const result = (await commitCapture(ctx, { capture_id: null, raw_text: item.title, items, source: 'chat' })) as { items?: { kind: string; id: string }[] };
   const organized = result.items?.length ? await autoOrganize(ctx, result.items, 'capture', false) : null;
@@ -600,10 +648,45 @@ async function updateProject(ctx: Ctx, input: z.infer<typeof ProjectUpdateInput>
     if (goal.user_id && goal.user_id !== ctx.userId) throw new ToolError('Only the project’s owner can change its team.');
     p.team_id = input.team.toLowerCase() === 'none' ? null : findTeam(teams, input.team).id;
   }
+  if (input.status) {
+    p.status = input.status;
+    if (input.status === 'active' && goal.status === 'parked' && input.revisit_on === undefined) p.revisit_on = null;
+  }
+  if (input.revisit_on !== undefined) p.revisit_on = input.revisit_on;
+  if (input.revisit_when !== undefined) p.revisit_when = input.revisit_when || null;
   if (!Object.keys(p).length && !input.add_note) throw new ToolError('Nothing to change.');
   if (Object.keys(p).length) await must(ctx.db.from('goals').update(p).eq('id', goal.id).select('id'));
   if (input.add_note) await must(ctx.db.from('goal_context').insert({ goal_id: goal.id, kind: 'note', body: input.add_note }).select('id'));
   return { status: 'updated', id: goal.id, changed: [...Object.keys(p).filter((k) => k !== 'meaning_source').map((k) => (k === 'team_id' ? 'team' : k)), ...(input.add_note ? ['note added'] : [])] };
+}
+
+async function parkProject(ctx: Ctx, input: z.infer<typeof ParkInput>) {
+  const { areas, goals } = await load(ctx);
+  const revisit = { revisit_on: input.revisit_on ?? null, revisit_when: input.revisit_when || null };
+  let goalId: string;
+  if (input.id) {
+    const goal = goals.find((g) => g.id === input.id);
+    if (!goal) throw new ToolError('No open project with that id. Call get_overview for current ids.');
+    await must(ctx.db.from('goals').update({ status: 'parked', ...revisit, ...(input.why ? { meaning: input.why, meaning_source: 'user' } : {}) }).eq('id', goal.id).select('id'));
+    goalId = goal.id;
+  } else {
+    if (!input.title) throw new ToolError('Give a title for a new idea, or the id of a project to park.');
+    let areaId: string | null = null;
+    if (input.area) {
+      const n = input.area.toLowerCase();
+      areaId = (areas.find((a) => a.name.toLowerCase() === n) ?? areas.find((a) => a.name.toLowerCase().startsWith(n)))?.id ?? null;
+    }
+    const row = await must(ctx.db.from('goals').insert({
+      title: input.title, status: 'parked', life_area_id: areaId, ...revisit,
+      meaning: input.why ?? null, meaning_source: input.why ? 'user' : 'none',
+    }).select('id').single()) as { id: string };
+    goalId = row.id;
+  }
+  if (input.notes) await must(ctx.db.from('goal_context').insert({ goal_id: goalId, kind: 'note', body: input.notes }).select('id'));
+  if (input.rough_steps?.length) {
+    await must(ctx.db.from('actions').insert(input.rough_steps.map((title, i) => ({ goal_id: goalId, title, origin: 'ai', status: 'ready', sort_order: i + 1 }))).select('id'));
+  }
+  return { status: 'parked', id: goalId, ...revisit, message: 'Parked. It stays out of Today and their lists until it comes back.' };
 }
 
 async function completeTask(ctx: Ctx, id: string) {
@@ -695,6 +778,7 @@ async function callTool(ctx: Ctx, name: string, args: unknown, client: string | 
     }
     case 'update_task': return updateTask(ctx, parse(UpdateInput, args));
     case 'update_project': return updateProject(ctx, parse(ProjectUpdateInput, args));
+    case 'park_project': return parkProject(ctx, parse(ParkInput, args));
     case 'complete_task': return completeTask(ctx, parse(IdInput, args).id);
     case 'get_inbox': return inbox(ctx, parse(InboxInput, args));
     case 'read_email_thread': {

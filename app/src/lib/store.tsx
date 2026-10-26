@@ -661,9 +661,12 @@ function useStoreValue() {
   // `actions` (theirs); project pages use `allActions` to show every step and who has it.
   const me = session?.user.id ?? '';
   const mine = useMemo(() => {
-    if (!data.teams.length) return { actions: data.actions, goals: data.goals };
+    // A parked project's rough steps wait with it: they show on its page, not in task lists or Today.
+    const parked = new Set(data.goals.filter((g) => g.status === 'parked').map((g) => g.id));
+    const live = parked.size ? data.actions.filter((a) => !a.goal_id || !parked.has(a.goal_id)) : data.actions;
+    if (!data.teams.length) return { actions: live, goals: data.goals };
     const t = { members: data.teamMembers, roles: data.teamRoles, memberRoles: data.teamMemberRoles };
-    const actions = data.actions.filter((a) => isMine(a, data.goals, me, t));
+    const actions = live.filter((a) => isMine(a, data.goals, me, t));
     const goals = data.goals.filter((g) => !g.team_id || g.user_id === me || actions.some((a) => a.goal_id === g.id));
     return { actions, goals };
   }, [data.actions, data.goals, data.teams, data.teamMembers, data.teamRoles, data.teamMemberRoles, me]);
