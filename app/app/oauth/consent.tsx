@@ -37,7 +37,10 @@ export default function Consent() {
       return;
     }
     supabase.auth.oauth.getAuthorizationDetails(id).then(({ data, error: e }) => {
-      if (e || !data) return setError('This connection request has expired. Start again from your AI app.');
+      if (e || !data) {
+        console.warn('OAuth authorization details failed', e);
+        return setError(`This connection request couldn’t be loaded${e?.message ? ` (${e.message})` : ''}. Start again from your AI app.`);
+      }
       if (!('authorization_id' in data)) return go(data.redirect_url); // already allowed before
       setDetails(data as Details);
     });
