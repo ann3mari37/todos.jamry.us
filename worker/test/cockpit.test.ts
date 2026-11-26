@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
-import { safeReturn } from '../src/email/accounts';
+import { safeReturn, startOAuth } from '../src/email/accounts';
 import { parseSale } from '../src/payhip';
 
 const env = {
@@ -56,4 +56,29 @@ describe('cockpit: calendar routes need a signed-in user', () => {
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://admin.malindaperryconsulting.com');
     });
   }
+});
+
+describe('cockpit features stay on malindaperryconsulting.com', () => {
+  for (const path of ['/api/calendar/list', '/api/payhip/stores', '/api/payhip/hook/' + 'a'.repeat(32)]) {
+    it(`${path} does not exist on todos.jamry.us`, async () => {
+      const f = vi.fn(async () => new Response('{}'));
+      vi.stubGlobal('fetch', f);
+      const res = await worker.fetch(new Request(`https://todos.jamry.us${path}`, { method: 'POST', headers: { Origin: 'https://todos.jamry.us', Authorization: 'Bearer t' }, body: '{}' }), env as never);
+      expect(res.status).toBe(404);
+      expect(f).not.toHaveBeenCalled();
+    });
+  }
+
+  const oauthEnv = { ...env, EMAIL_TOKEN_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret' };
+  it('connecting Gmail on todos.jamry.us asks Google for exactly what it always did', async () => {
+    const { url } = await startOAuth({ ...oauthEnv, APP_URL: 'https://todos.jamry.us' } as never, 'u1', 'gmail');
+    expect(new URL(url).searchParams.get('scope')).toBe('openid email https://www.googleapis.com/auth/gmail.modify');
+  });
+  it('connecting from tasks.malindaperryconsulting.com also asks for calendar access', async () => {
+    const { url } = await startOAuth({ ...oauthEnv, APP_URL: 'https://tasks.malindaperryconsulting.com', API_URL: 'https://tasks.malindaperryconsulting.com' } as never, 'u1', 'gmail');
+    const scope = new URL(url).searchParams.get('scope')!;
+    expect(scope).toContain('calendar.readonly');
+    expect(scope).toContain('calendar.events');
+    expect(new URL(url).searchParams.get('redirect_uri')).toBe('https://tasks.malindaperryconsulting.com/api/email/oauth/callback');
+  });
 });

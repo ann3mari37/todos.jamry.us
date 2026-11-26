@@ -2,7 +2,7 @@ import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
-import { sharedSessionStorage, usesSharedSession } from './sharedSession';
+import { forwardFromOldAddress, sharedSessionStorage, usesSharedSession } from './sharedSession';
 
 // Public values only. The anon key is safe in clients because every table is protected by RLS.
 export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -16,7 +16,15 @@ const webStorage = () => {
   const jar = { read: () => document.cookie, write: (c: string) => { document.cookie = c; } };
   let local: Storage | null = null;
   try { local = window.localStorage; } catch { local = null; }
-  return sharedSessionStorage(jar, local);
+  const storage = sharedSessionStorage(jar, local);
+  // The old address forwards to tasks.malindaperryconsulting.com. Move the session into the shared cookie first
+  // (reading it does that), so nobody has to sign in again.
+  const target = forwardFromOldAddress(window.location);
+  if (target) {
+    try { storage.getItem(`sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`); } catch { /* not signed in */ }
+    window.location.replace(target);
+  }
+  return storage;
 };
 
 export const supabase = createClient(SUPABASE_URL || 'https://not-configured.invalid', SUPABASE_ANON_KEY || 'missing', {

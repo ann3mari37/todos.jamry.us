@@ -67,3 +67,11 @@ export function sharedSessionStorage(jar: CookieJar, local: Pick<Storage, 'getIt
     removeItem(key: string) { removeShared(jar, key); local?.removeItem(key); },
   };
 }
+
+/** dashboard.malindaperryconsulting.com moved to tasks.malindaperryconsulting.com. Where to forward this page, or
+ *  null to stay. The AI-chat sign-in pages (/oauth…) stay put: a connected chat may still be using the old address. */
+export function forwardFromOldAddress(loc: { hostname: string; pathname: string; search: string; hash: string }): string | null {
+  if (loc.hostname.toLowerCase() !== 'dashboard.' + SHARED_DOMAIN) return null;
+  if (loc.pathname.startsWith('/oauth') || loc.pathname.startsWith('/api')) return null;
+  return `https://tasks.${SHARED_DOMAIN}${loc.pathname}${loc.search}${loc.hash}`;
+}

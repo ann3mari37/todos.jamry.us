@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readShared, removeShared, sharedSessionStorage, usesSharedSession, writeShared } from '../../lib/sharedSession';
+import { forwardFromOldAddress, readShared, removeShared, sharedSessionStorage, usesSharedSession, writeShared } from '../../lib/sharedSession';
 
 // A tiny stand-in for document.cookie: writes set or delete one cookie, reads list them all.
 function fakeJar() {
@@ -54,5 +54,17 @@ describe('shared session cookie', () => {
     expect(storage.getItem('k')).toBe('{"refresh_token":"r"}');
     expect(local.has('k')).toBe(false);
     expect(readShared(jar, 'k')).toBe('{"refresh_token":"r"}');
+  });
+});
+
+describe('the old dashboard address', () => {
+  const at = (hostname: string, pathname = '/', search = '', hash = '') => ({ hostname, pathname, search, hash });
+  it('forwards dashboard. pages to tasks., keeping the path', () => {
+    expect(forwardFromOldAddress(at('dashboard.malindaperryconsulting.com', '/project/1', '?x=1', '#a'))).toBe('https://tasks.malindaperryconsulting.com/project/1?x=1#a');
+  });
+  it('leaves the AI-chat sign-in pages and every other address alone', () => {
+    expect(forwardFromOldAddress(at('dashboard.malindaperryconsulting.com', '/oauth/consent'))).toBeNull();
+    expect(forwardFromOldAddress(at('tasks.malindaperryconsulting.com'))).toBeNull();
+    expect(forwardFromOldAddress(at('todos.jamry.us'))).toBeNull();
   });
 });

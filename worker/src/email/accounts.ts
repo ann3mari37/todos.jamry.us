@@ -9,14 +9,16 @@ import { ImapProvider } from './imap';
 import { OutlookProvider } from './outlook';
 import { ProviderError, type MailProvider, type ProviderKind } from './types';
 import { webmailForImapHost } from '../../../app/src/core/emailBrief';
+import { isMpcSite } from '../mpc';
 
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
 const MS_AUTH = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const MS_TOKEN = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
-// Calendar access is for the cockpit's calendar (read every calendar, add events). Accounts connected before it
-// was added keep working for mail and are asked to reconnect for the calendar.
-const GOOGLE_SCOPES = 'openid email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events';
+const GOOGLE_SCOPES = 'openid email https://www.googleapis.com/auth/gmail.modify';
+// Only when connecting from a malindaperryconsulting.com address: calendar access for the MaLinda Perry cockpit
+// (read every calendar, add events). Other addresses ask Google for exactly what they always did.
+const MPC_CALENDAR_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events';
 const MS_SCOPES = 'offline_access openid email User.Read Mail.ReadWrite';
 
 export const ACCOUNT_COLORS = ['#47A9A6', '#EE6B85', '#F2B84B', '#A98BDB', '#86B868', '#F59A6B', '#6C9BD2'];
@@ -57,8 +59,9 @@ export function safeReturn(env: Env, returnTo?: string): string {
 export async function startOAuth(env: Env, userId: string, provider: 'gmail' | 'outlook', returnTo?: string) {
   const c = oauthConfig(env, provider);
   const state = await signState(env.EMAIL_TOKEN_KEY, { u: userId, p: provider, r: safeReturn(env, returnTo) });
+  const scope = provider === 'gmail' && isMpcSite(env.APP_URL) ? `${c.scopes} ${MPC_CALENDAR_SCOPES}` : c.scopes;
   const q = new URLSearchParams({
-    client_id: c.id!, redirect_uri: redirectUri(env), response_type: 'code', scope: c.scopes, state,
+    client_id: c.id!, redirect_uri: redirectUri(env), response_type: 'code', scope, state,
     ...(provider === 'gmail' ? { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' } : { response_mode: 'query', prompt: 'select_account' }),
   });
   return { url: `${c.auth}?${q}` };

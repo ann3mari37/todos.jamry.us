@@ -79,13 +79,17 @@ What is stored: message metadata (sender, subject, a provider preview of 600 cha
 
 ## MaLinda Perry cockpit
 
-The cockpit at `https://admin.malindaperryconsulting.com` (repo `ann3mari37/dashboard.malindaperryconsulting.com`) is one dashboard for MaLinda Perry Consulting and Happy Girls Don't Do That. It reads this app's database with the signed-in user's session and calls this Worker for Google Calendar and Payhip. It shows this app inside its Tasks view, so `app/public/_headers` lets that one site frame it.
+The cockpit at `https://admin.malindaperryconsulting.com` (repo `ann3mari37/dashboard.malindaperryconsulting.com`) is one dashboard for MaLinda Perry Consulting and Happy Girls Don't Do That. It shows this app as its Tasks view, reads this app's database with the signed-in user's session, and calls this Worker for Google Calendar and Payhip.
 
-- **One sign-in:** on `*.malindaperryconsulting.com` the Supabase session lives in a cookie for the whole domain (`app/src/lib/sharedSession.ts`), so the cockpit and this app share it. Other addresses still use localStorage.
-- **Database:** apply `supabase/migrations/20261126000000_cockpit.sql` (cockpit_sources, payhip_stores, payhip_sales).
-- **Google Calendar:** in Google Cloud Console, enable the **Google Calendar API** and add the scopes `calendar.readonly` and `calendar.events` to the consent screen. Add `https://dashboard.malindaperryconsulting.com/api/email/oauth/callback` as a redirect URI (the cockpit connects through that address). Accounts connected before this must reconnect once; until then their calendars show "Reconnect for calendar". While the Google app is in *Testing*, Google ends connections after 7 days; publish it (or use an *Internal* app on Google Workspace) so connections last.
+**Everything for the cockpit is switched on only for malindaperryconsulting.com addresses.** todos.jamry.us behaves exactly as before: no calendar permission requested, no calendar or Payhip routes, no framing, localStorage sign-in.
+
+- **Address:** the app's MaLinda Perry address is now `tasks.malindaperryconsulting.com`. Pages on `dashboard.malindaperryconsulting.com` forward there (the AI-chat sign-in pages under `/oauth` and the API stay, so a chat already connected to the old address keeps working).
+- **One sign-in:** on `*.malindaperryconsulting.com` the Supabase session lives in a cookie for the whole domain (`app/src/lib/sharedSession.ts`), shared with the cockpit. An existing localStorage session is moved over, so nobody is signed out.
+- **Framing:** `app/public/_headers` lets only the cockpit frame the app, and only on `tasks.malindaperryconsulting.com` (a host-specific rule). After deploying, check `curl -sI https://tasks.malindaperryconsulting.com/ | grep -i frame` shows `frame-ancestors 'self' https://admin.malindaperryconsulting.com`, and `curl -sI https://todos.jamry.us/ | grep -i frame` still shows `DENY` / `'none'`. If the host rule isn't applied, add the same change as a Response Header Transform Rule on the malindaperryconsulting.com zone instead.
+- **Database:** apply `supabase/migrations/20261126000000_cockpit.sql` (new tables cockpit_sources, payhip_stores, payhip_sales; nothing existing changes).
+- **Google Calendar:** in Google Cloud Console, enable the **Google Calendar API**, add the scopes `calendar.readonly` and `calendar.events` to the consent screen, and add `https://tasks.malindaperryconsulting.com/api/email/oauth/callback` as a redirect URI. Only connections started from a malindaperryconsulting.com address ask for these. Accounts connected before must reconnect once from the cockpit's Settings. While the Google app is in *Testing*, Google ends connections after 7 days; publish it (or use an *Internal* app on Google Workspace) so connections last.
 - **Payhip:** in the cockpit's Settings, add each store. It shows a webhook address once; paste it into Payhip's webhook settings. One Worker request per sale. Nothing about buyers is stored.
-- **Routes:** `POST /api/calendar/list|events|create`, `POST /api/payhip/stores`, `POST /api/payhip/stores/delete` (signed in), and `POST /api/payhip/hook/<secret>` (called by Payhip).
+- **Routes (malindaperryconsulting.com addresses only):** `POST /api/calendar/list|events|create`, `POST /api/payhip/stores`, `POST /api/payhip/stores/delete` (signed in), and `POST /api/payhip/hook/<secret>` (called by Payhip).
 
 ## Monitoring and costs
 

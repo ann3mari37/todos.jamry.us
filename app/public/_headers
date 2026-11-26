@@ -1,2 +1,10 @@
 /*
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+
+# tasks.malindaperryconsulting.com only: the MaLinda Perry cockpit (admin.malindaperryconsulting.com) may show the
+# app inside its page. Every other address (todos.jamry.us included) keeps the rules above.
+https://tasks.malindaperryconsulting.com/*
+  ! X-Frame-Options
+  ! Content-Security-Policy
   Content-Security-Policy: frame-ancestors 'self' https://admin.malindaperryconsulting.com

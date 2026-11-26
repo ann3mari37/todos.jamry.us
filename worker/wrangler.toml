@@ -10,7 +10,8 @@ compatibility_flags = ["nodejs_compat"]
 # The dashboard is a custom domain, so Cloudflare creates its DNS record and certificate itself.
 routes = [
   { pattern = "todos.jamry.us/*", zone_name = "jamry.us" },
-  { pattern = "dashboard.malindaperryconsulting.com", custom_domain = true },
+  { pattern = "dashboard.malindaperryconsulting.com", custom_domain = true }, # old address; the app forwards it to tasks.
+  { pattern = "tasks.malindaperryconsulting.com", custom_domain = true },
 ]
 
 # Deployed automatically by Cloudflare Workers Builds on every push to main (see docs/OPERATIONS.md):
@@ -32,7 +33,7 @@ AI_MODEL = "claude-opus-5-5"
 OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe" # optional voice input; needs OPENAI_API_KEY
 # Every address the app is served from (links and CORS follow the one a request came in on), plus the
 # MaLinda Perry cockpit (admin.malindaperryconsulting.com), which calls this API from its own site.
-ALLOWED_ORIGINS = "https://todos.jamry.us,https://dashboard.malindaperryconsulting.com,https://admin.malindaperryconsulting.com"
+ALLOWED_ORIGINS = "https://todos.jamry.us,https://dashboard.malindaperryconsulting.com,https://tasks.malindaperryconsulting.com,https://admin.malindaperryconsulting.com"
 AI_HOURLY_LIMIT = "60"
 AI_DAILY_COST_CAP_USD = "1.00"
 APP_URL = "https://todos.jamry.us"
