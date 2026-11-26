@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ApplyOrganizeInput, CommitCaptureInput } from '../../app/src/core/ai-contracts';
+import * as calendar from './calendar';
 import { runScheduled } from './cron';
 import { availableProviders, connectImap, disconnect, finishOAuth, startOAuth } from './email/accounts';
 import * as email from './email/service';
@@ -8,6 +9,7 @@ import { enforceLimits, transcribe } from './ai';
 import { authorizationServerMetadata, authorize, consentProxy, handleMcp, MCP_CORS, protectedResourceMetadata } from './mcp';
 import * as ops from './ops';
 import * as organize from './organize';
+import * as payhip from './payhip';
 import { authenticate, HttpError } from './supabase';
 
 const MAX_BODY = 64 * 1024;
@@ -119,6 +121,13 @@ const DATA_ROUTES: Record<string, Handler> = {
     return { digest: await email.buildDigest(env, c.db, c.userId, input, await ops.aiAllowed({ env, ...c })) };
   },
   '/api/email/modify': async (req, env, c) => email.modifyMessages(env, c.db, c.userId, parse(email.ModifyInput, await readJson(req))),
+
+  // The MaLinda Perry cockpit (admin.malindaperryconsulting.com): Google Calendar and Payhip stores.
+  '/api/calendar/list': async (_req, env, c) => calendar.listCalendars(env, c.db),
+  '/api/calendar/events': async (req, env, c) => calendar.listEvents(env, c.db, parse(calendar.EventsInput, await readJson(req))),
+  '/api/calendar/create': async (req, env, c) => calendar.createEvent(env, c.db, parse(calendar.CreateInput, await readJson(req))),
+  '/api/payhip/stores': async (req, env, c) => payhip.addStore(env, c.db, c.userId, parse(payhip.StoreInput, await readJson(req))),
+  '/api/payhip/stores/delete': async (req, _env, c) => payhip.deleteStore(c.db, parse(z.object({ store_id: z.string().uuid() }), await readJson(req)).store_id),
 };
 
 /**
@@ -155,6 +164,8 @@ export default {
       if (pathname === '/api/health') return json({ ok: true, ai: !!env.ANTHROPIC_API_KEY, voice: !!env.OPENAI_API_KEY, email: availableProviders(env), env: env.ENVIRONMENT ?? 'production' }, 200, headers);
       // OAuth providers redirect the browser here (GET, no bearer token); the signed state identifies the user.
       if (pathname === '/api/email/oauth/callback' && req.method === 'GET') return finishOAuth(env, new URL(req.url));
+      // Payhip calls this on every sale; the secret in the address identifies the store (no sign-in, no CORS).
+      if (pathname.startsWith('/api/payhip/hook/') && req.method === 'POST') return payhip.handleHook(req, env, pathname.slice('/api/payhip/hook/'.length));
       const handler = AI_ROUTES[pathname] ?? DATA_ROUTES[pathname];
       if (!handler) throw new HttpError(404, 'not_found');
       if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');

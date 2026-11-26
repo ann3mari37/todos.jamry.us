@@ -77,6 +77,16 @@ Users can connect any number of inboxes: Gmail and Outlook through OAuth, and an
 
 What is stored: message metadata (sender, subject, a provider preview of 600 characters at most), AI summaries, and categories. Bodies are never stored; whole threads are fetched only when a user taps *Summarize the whole thread*. Tokens and passwords are AES-GCM encrypted in `email_credentials`, which has RLS on and no policies, so only the Worker's service role can read it. The daily cron syncs every inbox, triages new mail, and writes the morning digest.
 
+## MaLinda Perry cockpit
+
+The cockpit at `https://admin.malindaperryconsulting.com` (repo `ann3mari37/dashboard.malindaperryconsulting.com`) is one dashboard for MaLinda Perry Consulting and Happy Girls Don't Do That. It reads this app's database with the signed-in user's session and calls this Worker for Google Calendar and Payhip. It shows this app inside its Tasks view, so `app/public/_headers` lets that one site frame it.
+
+- **One sign-in:** on `*.malindaperryconsulting.com` the Supabase session lives in a cookie for the whole domain (`app/src/lib/sharedSession.ts`), so the cockpit and this app share it. Other addresses still use localStorage.
+- **Database:** apply `supabase/migrations/20261126000000_cockpit.sql` (cockpit_sources, payhip_stores, payhip_sales).
+- **Google Calendar:** in Google Cloud Console, enable the **Google Calendar API** and add the scopes `calendar.readonly` and `calendar.events` to the consent screen. Add `https://dashboard.malindaperryconsulting.com/api/email/oauth/callback` as a redirect URI (the cockpit connects through that address). Accounts connected before this must reconnect once; until then their calendars show "Reconnect for calendar". While the Google app is in *Testing*, Google ends connections after 7 days; publish it (or use an *Internal* app on Google Workspace) so connections last.
+- **Payhip:** in the cockpit's Settings, add each store. It shows a webhook address once; paste it into Payhip's webhook settings. One Worker request per sale. Nothing about buyers is stored.
+- **Routes:** `POST /api/calendar/list|events|create`, `POST /api/payhip/stores`, `POST /api/payhip/stores/delete` (signed in), and `POST /api/payhip/hook/<secret>` (called by Payhip).
+
 ## Monitoring and costs
 
 - **AI usage:** `select operation, count(*), sum(cost_usd) from ai_operations where created_at > now() - interval '30 days' group by 1;`. Settings → AI Preferences shows a 30-day total.

@@ -14,7 +14,9 @@ const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
 const MS_AUTH = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const MS_TOKEN = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
-const GOOGLE_SCOPES = 'openid email https://www.googleapis.com/auth/gmail.modify';
+// Calendar access is for the cockpit's calendar (read every calendar, add events). Accounts connected before it
+// was added keep working for mail and are asked to reconnect for the calendar.
+const GOOGLE_SCOPES = 'openid email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events';
 const MS_SCOPES = 'offline_access openid email User.Read Mail.ReadWrite';
 
 export const ACCOUNT_COLORS = ['#47A9A6', '#EE6B85', '#F2B84B', '#A98BDB', '#86B868', '#F59A6B', '#6C9BD2'];
@@ -40,9 +42,21 @@ export function availableProviders(env: Env) {
   };
 }
 
+/** Where to send the browser after connecting: a path in this app, or a page on one of our own sites (the cockpit). */
+export function safeReturn(env: Env, returnTo?: string): string {
+  if (!returnTo) return '/email-accounts';
+  if (returnTo.startsWith('/') && !returnTo.startsWith('//')) return returnTo;
+  try {
+    const u = new URL(returnTo);
+    const ours = (env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
+    if (u.protocol === 'https:' && ours.includes(u.origin)) return u.href;
+  } catch { /* not a URL */ }
+  return '/email-accounts';
+}
+
 export async function startOAuth(env: Env, userId: string, provider: 'gmail' | 'outlook', returnTo?: string) {
   const c = oauthConfig(env, provider);
-  const state = await signState(env.EMAIL_TOKEN_KEY, { u: userId, p: provider, r: returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/email-accounts' });
+  const state = await signState(env.EMAIL_TOKEN_KEY, { u: userId, p: provider, r: safeReturn(env, returnTo) });
   const q = new URLSearchParams({
     client_id: c.id!, redirect_uri: redirectUri(env), response_type: 'code', scope: c.scopes, state,
     ...(provider === 'gmail' ? { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' } : { response_mode: 'query', prompt: 'select_account' }),
@@ -103,7 +117,11 @@ async function saveAccount(env: Env, userId: string, row: { provider: ProviderKi
 /** GET /api/email/oauth/callback — the browser lands here from Google/Microsoft; we redirect back into the app. */
 export async function finishOAuth(env: Env, url: URL): Promise<Response> {
   // The return path may carry its own query (e.g. /onboarding?step=email).
-  const back = (path: string, params: Record<string, string>) => Response.redirect(`${appUrl(env)}${path}${path.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`, 302);
+  const back = (path: string, params: Record<string, string>) => {
+    const target = /^https:\/\//.test(path) ? safeReturn(env, path) : path; // full addresses only for our own sites
+    const base = /^https:\/\//.test(target) ? '' : appUrl(env);
+    return Response.redirect(`${base}${target}${target.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`, 302);
+  };
   let returnTo = '/email-accounts';
   try {
     const state = await verifyState(env.EMAIL_TOKEN_KEY, url.searchParams.get('state') ?? '');
@@ -170,6 +188,20 @@ export async function providerFor(env: Env, account: { id: string; provider: Pro
     });
   }
 
+  const token = await oauthToken(env, account, cred);
+  return account.provider === 'gmail' ? new GmailProvider(token) : new OutlookProvider(token);
+}
+
+/** A current Google access token for a connected Gmail account (the cockpit's calendar uses it). */
+export async function googleAccessToken(env: Env, accountId: string): Promise<string> {
+  const { data } = await serviceClient(env).from('email_credentials').select('*').eq('account_id', accountId).maybeSingle();
+  if (!data) throw new ProviderError('needs_reauth', 'no_credentials');
+  return oauthToken(env, { id: accountId, provider: 'gmail' }, data as CredRow);
+}
+
+async function oauthToken(env: Env, account: { id: string; provider: ProviderKind }, cred: CredRow): Promise<string> {
+  if (account.provider === 'imap') throw new ProviderError('provider_error', 'not_oauth');
+  const db = serviceClient(env);
   let token = cred.access_token_enc ? await decrypt(env.EMAIL_TOKEN_KEY, cred.access_token_enc) : '';
   if (!token || !cred.access_expires_at || new Date(cred.access_expires_at).getTime() < Date.now() + 30_000) {
     try {
@@ -188,7 +220,7 @@ export async function providerFor(env: Env, account: { id: string; provider: Pro
       throw e;
     }
   }
-  return account.provider === 'gmail' ? new GmailProvider(token) : new OutlookProvider(token);
+  return token;
 }
 
 /** Best-effort token revocation, then delete the account (credentials and messages cascade). */
