@@ -60,3 +60,10 @@ grant select (id, user_id, name, company, created_at) on payhip_stores to authen
 revoke update on payhip_stores from anon, authenticated;
 grant update (name, company) on payhip_stores to authenticated;
 create policy "own sales read" on payhip_sales for select using (user_id = auth.uid());
+
+-- The cockpit updates its sales line the moment a sale arrives.
+do $$ begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    alter publication supabase_realtime add table payhip_sales;
+  end if;
+end $$;
