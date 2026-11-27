@@ -142,7 +142,7 @@ const TOOLS = [
   {
     name: 'get_today',
     title: "Read today's suggestions",
-    description: "Returns Momentum's suggestions for today in its four categories (Meaningful Move, Time-Sensitive, Easy Momentum, Quietly Waiting) plus a few next-up tasks, each with the reason it was picked.",
+    description: "Returns Momentum's suggestions for today in its four categories (Meaningful Move, Time-Sensitive, Easy Momentum, Quietly Waiting) plus a few next-up tasks, each with the reason it was picked. Also returns yesterday: the tasks that were on yesterday's Today, which got finished, which did not (not_finished: offer to carry these over), what else got finished, and the note left at the end of the day.",
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
@@ -514,6 +514,49 @@ async function pins(ctx: Ctx, actions: Action[]) {
   };
 }
 
+/** The person's local calendar date of a moment (an ISO time), in their time zone. */
+function dayOf(tz: string, iso: string): string {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso)); }
+  catch { return iso.slice(0, 10); }
+}
+
+/**
+ * Yesterday, for "Start my day": what Today held (its picks), which of those got done and which didn't (those carry
+ * over), what else was finished, and the note left under End my day. The picks come from yesterday's saved plan.
+ */
+async function yesterdayRecap(ctx: Ctx) {
+  const { data: prof } = await ctx.db.from('profiles').select('timezone').maybeSingle();
+  const tz = (prof as { timezone?: string } | null)?.timezone || 'UTC';
+  const day = localDate(tz, -1);
+  const { data: row } = await ctx.db.from('daily_checkins').select('plan,note,started_at,ended_at').eq('day', day).maybeSingle();
+  const c = (row ?? null) as { plan?: { picks?: { action_id?: string | null }[]; done?: string[]; skipped?: string[] } | null; note?: string | null; started_at?: string | null; ended_at?: string | null } | null;
+  const plan = c?.plan ?? null;
+  const pickIds = [...new Set((plan?.picks ?? []).map((x) => x?.action_id).filter((x): x is string => !!x))];
+  const skipped = new Set(plan?.skipped ?? []);
+  const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  const cols = 'id,title,status,completed_at,due_date,goal_id,user_id';
+  const [picked, recent] = await Promise.all([
+    pickIds.length ? must(ctx.db.from('actions').select(cols).in('id', pickIds)) : Promise.resolve([]),
+    must(ctx.db.from('actions').select(cols).eq('status', 'completed').gte('completed_at', since)),
+  ]);
+  type Row = { id: string; title: string; status: string; completed_at: string | null; due_date: string | null; goal_id: string | null; user_id: string };
+  const rows = picked as Row[];
+  const doneOn = (a: Row, d: string) => a.status === 'completed' && !!a.completed_at && dayOf(tz, a.completed_at) <= d;
+  const t = (a: Row) => ({ task_id: a.id, title: a.title });
+  const finishedYesterday = (recent as Row[]).filter((a) => a.user_id === ctx.userId && a.completed_at && dayOf(tz, a.completed_at) === day);
+  return {
+    date: day,
+    had_a_plan: pickIds.length > 0,
+    planned: rows.map(t),
+    finished_from_plan: rows.filter((a) => doneOn(a, day)).map(t),
+    // Picked for yesterday and still open: these carry over to today unless the person says otherwise.
+    not_finished: rows.filter((a) => !doneOn(a, day) && a.status !== 'completed' && a.status !== 'dismissed')
+      .map((a) => ({ ...t(a), status: a.status, due_date: a.due_date, moved_past: skipped.has(a.id) })),
+    also_finished: finishedYesterday.filter((a) => !pickIds.includes(a.id)).map(t),
+    end_of_day_note: c?.note ?? null,
+  };
+}
+
 async function today(ctx: Ctx) {
   const { areas, mineGoals: goals, mineActions: actions, actions: all } = await load(ctx);
   const [deps, feedback] = await Promise.all([
@@ -524,8 +567,10 @@ async function today(ctx: Ctx) {
   const recs = recommend({ goals, actions, knownActions: all, dependencies: deps as never, feedback: feedback as never, lifeAreas: areas })
     .filter((r) => r.action?.id !== pinned.first_thing_today?.task_id);
   const first = pinned.first_thing_today ? actions.find((a) => a.id === pinned.first_thing_today!.task_id)! : null;
+  const yesterday = await yesterdayRecap(ctx).catch(() => null);
   return {
     first_thing_today: pinned.first_thing_today,
+    yesterday,
     first_thing_tomorrow: pinned.first_thing_tomorrow,
     suggestions: [
       ...(first ? [{ category: 'Their first thing (pinned by them)', task_id: first.id, task: first.title, project: goals.find((g) => g.id === first.goal_id)?.title ?? null, minutes: first.estimated_minutes, reason: 'They chose this to start the day with. Keep it first.' }] : []),

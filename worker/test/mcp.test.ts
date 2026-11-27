@@ -156,4 +156,34 @@ describe('MCP connector', () => {
     const bad = await call({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'complete_task', arguments: { id: 'not-a-uuid' } } });
     expect(bad.result.isError).toBe(true);
   });
+  it("get_today recaps yesterday: what was planned, finished, not finished (to carry over), and the end-of-day note", async () => {
+    supabase();
+    const base = fetch;
+    const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    const at = (n: number) => `${day(n)}T12:00:00.000Z`;
+    const A = 'aaaaaaaa-0000-4000-8000-000000000001', B = 'aaaaaaaa-0000-4000-8000-000000000002', C = 'aaaaaaaa-0000-4000-8000-000000000003';
+    const D = 'aaaaaaaa-0000-4000-8000-000000000004', E = 'aaaaaaaa-0000-4000-8000-000000000005';
+    const row = (id: string, title: string, status: string, done: number | null) => ({ id, title, status, completed_at: done === null ? null : at(done), due_date: null, goal_id: null, user_id: USER });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = decodeURIComponent(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      const one = String((init?.headers as Record<string, string> | undefined)?.Accept ?? (init?.headers instanceof Headers ? init.headers.get('Accept') : '')).includes('object');
+      if (url.includes('/rest/v1/profiles')) return jsonRes(one ? { timezone: 'UTC' } : [{ timezone: 'UTC' }]);
+      if (url.includes('/rest/v1/daily_checkins') && url.includes('day=eq.')) {
+        const r = { plan: { picks: [{ action_id: A }, { action_id: B }, { action_id: C }], skipped: [C] }, note: 'Call the printer first thing.', started_at: at(-1), ended_at: at(-1) };
+        return jsonRes(one ? r : [r]);
+      }
+      if (url.includes('/rest/v1/actions') && url.includes('id=in.')) return jsonRes([row(A, 'Send the invoice', 'completed', -1), row(B, 'Draft chapter 4', 'ready', null), row(C, 'Book the venue', 'ready', null)]);
+      if (url.includes('/rest/v1/actions') && url.includes('status=eq.completed')) return jsonRes([row(A, 'Send the invoice', 'completed', -1), row(D, 'Reply to Dana', 'completed', -1), row(E, 'Water plants', 'completed', 0)]);
+      return base(input, init);
+    }));
+    const out = await call({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'get_today', arguments: {} } });
+    expect(out.result.isError).toBeUndefined();
+    const y = out.result.structuredContent.yesterday;
+    expect(y.date).toBe(day(-1));
+    expect(y.had_a_plan).toBe(true);
+    expect(y.finished_from_plan.map((t: { title: string }) => t.title)).toEqual(['Send the invoice']);
+    expect(y.not_finished.map((t: { title: string; moved_past: boolean }) => [t.title, t.moved_past])).toEqual([['Draft chapter 4', false], ['Book the venue', true]]);
+    expect(y.also_finished.map((t: { title: string }) => t.title)).toEqual(['Reply to Dana']);
+    expect(y.end_of_day_note).toBe('Call the printer first thing.');
+  });
 });
