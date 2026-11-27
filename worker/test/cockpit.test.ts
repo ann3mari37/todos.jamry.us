@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import { safeReturn, startOAuth } from '../src/email/accounts';
-import { parseSale } from '../src/payhip';
+import { parseSale, parseSalesCsv } from '../src/payhip';
 
 const env = {
   SUPABASE_URL: 'https://sb.test',
@@ -80,5 +80,32 @@ describe('cockpit features stay on malindaperryconsulting.com', () => {
     expect(scope).toContain('calendar.readonly');
     expect(scope).toContain('calendar.events');
     expect(new URL(url).searchParams.get('redirect_uri')).toBe('https://tasks.malindaperryconsulting.com/api/email/oauth/callback');
+  });
+});
+
+describe('cockpit: importing past Payhip sales from the export', () => {
+  it('reads the columns by name, combines rows of one order and never keeps buyer details', () => {
+    const csv = '\uFEFFTransaction ID,Date,Product Name,Price,Currency,Buyer Email,Status\r\n' +
+      'T1,2026-11-20 14:05:00,"UNSTUCK ebook, 2nd ed.",12.00,usd,a@example.com,Completed\r\n' +
+      'T1,2026-11-20 14:05:00,Planner pages,$6.00,usd,a@example.com,Completed\r\n' +
+      'T2,2026-11-21T09:00:00Z,UNSTUCK ebook,12,USD,b@example.com,Refunded\r\n' +
+      ',,,,,,\r\n' +
+      'T3,not a date,UNSTUCK ebook,12,USD,c@example.com,Completed\r\n';
+    const s = parseSalesCsv(csv)!;
+    expect(s).toHaveLength(2);
+    expect(s[0]).toMatchObject({ payhip_id: 'T1', amount: 18, currency: 'USD', items: ['UNSTUCK ebook, 2nd ed.', 'Planner pages'], refunded: false });
+    expect(s[1]).toMatchObject({ payhip_id: 'T2', amount: 12, refunded: true, sold_at: '2026-11-21T09:00:00.000Z' });
+    expect(JSON.stringify(s)).not.toContain('example.com');
+  });
+  it('gives rows without a transaction id a stable id, so a second import adds nothing new', () => {
+    const csv = 'Date,Item,Amount\n2026-11-01,Guide,9.5\n';
+    expect(parseSalesCsv(csv)![0].payhip_id).toBe(parseSalesCsv(csv)![0].payhip_id);
+  });
+  it('refuses a file that is not a sales export', () => {
+    expect(parseSalesCsv('Name,Email\nA,a@example.com\n')).toBeNull();
+  });
+  it('the import needs a signed-in user', async () => {
+    const res = await worker.fetch(new Request('https://tasks.malindaperryconsulting.com/api/payhip/import', { method: 'POST', body: '{}' }), env as never);
+    expect(res.status).toBe(401);
   });
 });

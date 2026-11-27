@@ -31,11 +31,11 @@ function cors(req: Request, env: Env): Record<string, string> {
 const json = (data: unknown, status: number, headers: Record<string, string>) =>
   new Response(JSON.stringify(data), { status, headers: { ...headers, 'Content-Type': 'application/json' } });
 
-async function readJson(req: Request): Promise<unknown> {
+async function readJson(req: Request, max = MAX_BODY): Promise<unknown> {
   const len = Number(req.headers.get('Content-Length') ?? 0);
-  if (len > MAX_BODY) throw new HttpError(413, 'body_too_large');
+  if (len > max) throw new HttpError(413, 'body_too_large');
   const text = await req.text();
-  if (text.length > MAX_BODY) throw new HttpError(413, 'body_too_large');
+  if (text.length > max) throw new HttpError(413, 'body_too_large');
   try {
     return JSON.parse(text || '{}');
   } catch {
@@ -130,6 +130,7 @@ const DATA_ROUTES: Record<string, Handler> = {
   '/api/calendar/create': async (req, env, c) => calendar.createEvent(env, c.db, parse(calendar.CreateInput, await readJson(req))),
   '/api/payhip/stores': async (req, env, c) => payhip.addStore(env, c.db, c.userId, parse(payhip.StoreInput, await readJson(req))),
   '/api/payhip/stores/delete': async (req, _env, c) => payhip.deleteStore(c.db, parse(z.object({ store_id: z.string().uuid() }), await readJson(req)).store_id),
+  '/api/payhip/import': async (req, env, c) => payhip.importSales(env, c.db, parse(payhip.ImportInput, await readJson(req, 5_100_000))) /* a sales export can be large */,
 };
 
 /**
