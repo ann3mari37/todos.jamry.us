@@ -101,6 +101,18 @@ describe('cockpit: importing past Payhip sales from the export', () => {
     const csv = 'Date,Item,Amount\n2026-11-01,Guide,9.5\n';
     expect(parseSalesCsv(csv)![0].payhip_id).toBe(parseSalesCsv(csv)![0].payhip_id);
   });
+  it('reads Payhip\'s real export layout (Order ID, Amount Gross, Items In Cart, a date without a time)', () => {
+    const head = '"Order ID",Email,"First Name","Last Name",Currency,"Amount Gross","Amount Net",Status,"Num of Items In Cart","Items In Cart","Payment Type","Fulfillment Status",Date';
+    const s = parseSalesCsv(head + '\n' +
+      'AbC12,x@example.com,X,Y,USD,4.99,4.24,COMPLETED,1,Unstuck,Stripe,,2026-11-25\n' +
+      'Zz9,y@example.com,X,Y,USD,4.99,4.24,REFUNDED,1,Unstuck,Stripe,,2026-11-20\n')!;
+    expect(s[0]).toMatchObject({ payhip_id: 'AbC12', amount: 4.99, currency: 'USD', items: ['Unstuck'], refunded: false, sold_at: '2026-11-25T12:00:00.000Z' });
+    expect(s[1].refunded).toBe(true);
+  });
+  it('leaves out sales tax Payhip collected on top, as Payhip\'s own totals do', () => {
+    const csv = '"Order ID","Amount Gross","Payhip Collected Sales Tax Amount",Date\nA1,5.43,0.44,2026-11-25\nA2,4.99,0.00,2026-11-24\n';
+    expect(parseSalesCsv(csv)!.map((s) => s.amount)).toEqual([4.99, 4.99]);
+  });
   it('refuses a file that is not a sales export', () => {
     expect(parseSalesCsv('Name,Email\nA,a@example.com\n')).toBeNull();
   });

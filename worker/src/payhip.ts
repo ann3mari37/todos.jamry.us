@@ -99,6 +99,8 @@ export function csvRows(text: string): string[][] {
 
 const csvDate = (s: string): string | null => {
   if (!s) return null;
+  // Payhip's export gives only the day (2026-11-25). Midday UTC keeps it on that day in US time zones.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s + 'T12:00:00Z').toISOString();
   for (const v of [s, s.replace(' ', 'T')]) { const t = Date.parse(v); if (!Number.isNaN(t)) return new Date(t).toISOString(); }
   return null;
 };
@@ -115,16 +117,19 @@ export function parseSalesCsv(text: string): ImportedSale[] | null {
   const iDate = col(/^date$/, /date|created|paid at|purchased/);
   // The amount the buyer paid (what webhooks report), before Payhip's or PayPal/Stripe's fees.
   const iAmt = col(/^(price|total|amount)$/, /total|amount paid|price paid|^price|gross|amount/, /earning|net/);
+  // Sales tax Payhip collected on top of the price: Payhip's own sales totals leave it out, so the cockpit does too.
+  const iTax = col(/collected sales tax amount/);
   const iCur = col(/currency/);
-  const iItem = col(/product.?name|^product$|item.?name|^item$|^title$/, /product|item/);
+  const iItem = col(/^items? in cart$/, /product.?name|^product$|item.?name|^item$|^title$/, /^(?!num).*(product|item)/);
   const iStatus = col(/refund/, /status/);
   if (iDate < 0 || iAmt < 0) return null;
   const byId = new Map<string, ImportedSale>();
   for (const r of rows.slice(1)) {
     const cell = (i: number) => (i >= 0 ? (r[i] ?? '').trim() : '');
-    const amount = num(cell(iAmt));
+    const gross = num(cell(iAmt));
     const sold_at = csvDate(cell(iDate));
-    if (amount === null || !sold_at) continue;
+    if (gross === null || !sold_at) continue;
+    const amount = Math.round((gross - (num(cell(iTax)) ?? 0)) * 100) / 100;
     const item = cell(iItem).slice(0, 200);
     const status = cell(iStatus).toLowerCase();
     const refunded = /refund/.test(status) || status === 'yes' || status === 'true';
@@ -152,9 +157,9 @@ export async function importSales(env: Env, db: SupabaseClient, input: z.infer<t
   const rows = sales.map((s) => ({ user_id: store.user_id, store_id: store.id, ...s }));
   let added = 0;
   for (let i = 0; i < rows.length; i += 500) {
-    // Sales already here (from the webhook or an earlier import) are left as they are.
+    // The export is Payhip's own record, so a sale already here (same order id) is updated to match it, never doubled.
     const { data, error } = await serviceClient(env).from('payhip_sales')
-      .upsert(rows.slice(i, i + 500), { onConflict: 'store_id,payhip_id', ignoreDuplicates: true }).select('id');
+      .upsert(rows.slice(i, i + 500), { onConflict: 'store_id,payhip_id' }).select('id');
     if (error) throw new HttpError(500, 'import_failed');
     added += data?.length ?? 0;
   }
