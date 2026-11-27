@@ -132,7 +132,7 @@ const DATA_ROUTES: Record<string, Handler> = {
   '/api/payhip/stores': async (req, env, c) => payhip.addStore(env, c.db, c.userId, parse(payhip.StoreInput, await readJson(req))),
   '/api/payhip/stores/delete': async (req, _env, c) => payhip.deleteStore(c.db, parse(z.object({ store_id: z.string().uuid() }), await readJson(req)).store_id),
   // A one-time pass that signs the cockpit's owner in to her LinkHub (links.malindaperryconsulting.com).
-  '/api/links/handoff': async (_req, env, c) => links.handoff(env, c.email),
+  '/api/links/handoff': async (_req, env, c) => links.handoff(env, c.email, Date.now(), c.userId),
   '/api/payhip/import': async (req, env, c) => payhip.importSales(env, c.db, parse(payhip.ImportInput, await readJson(req, 5_100_000))) /* a sales export can be large */,
 };
 

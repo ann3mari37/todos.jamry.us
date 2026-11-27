@@ -21,11 +21,17 @@ export async function signPass(secret: string, pass: HandoffPass): Promise<strin
   return `${body}.${b64url(new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(body))))}`;
 }
 
-/** POST /api/links/handoff — only for the accounts in LINKS_HANDOFF_EMAILS. */
-export async function handoff(env: Env, email: string | null, now = Date.now()) {
-  const allowed = String(env.LINKS_HANDOFF_EMAILS ?? '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+const list = (v: string | undefined) => String(v ?? '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+
+/**
+ * POST /api/links/handoff — only for the accounts in LINKS_HANDOFF_USERS (by account ID) or LINKS_HANDOFF_EMAILS.
+ * The ID is the one to rely on: it stays the same when the account's email changes, the email doesn't.
+ */
+export async function handoff(env: Env, email: string | null, now = Date.now(), userId: string | null = null) {
   if (!env.LINKS_HANDOFF_KEY || !env.LINKS_USERNAME) throw new HttpError(503, 'links_not_configured');
-  if (!email || !allowed.includes(email.toLowerCase())) throw new HttpError(403, 'links_not_allowed');
+  const byId = !!userId && list(env.LINKS_HANDOFF_USERS).includes(userId.toLowerCase());
+  const byEmail = !!email && list(env.LINKS_HANDOFF_EMAILS).includes(email.toLowerCase());
+  if (!byId && !byEmail) throw new HttpError(403, 'links_not_allowed');
   const pass: HandoffPass = {
     u: env.LINKS_USERNAME, h: LINKS_HOST, exp: Math.floor(now / 1000) + 120,
     n: b64url(crypto.getRandomValues(new Uint8Array(16))),
