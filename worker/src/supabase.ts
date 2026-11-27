@@ -23,7 +23,7 @@ export function serviceClient(env: Env): SupabaseClient {
 }
 
 /** Verifies a Supabase-issued access token with Supabase Auth and returns the user id. */
-export async function authenticate(req: Request, env: Env): Promise<{ userId: string; token: string; db: SupabaseClient }> {
+export async function authenticate(req: Request, env: Env): Promise<{ userId: string; email: string | null; token: string; db: SupabaseClient }> {
   const header = req.headers.get('Authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) throw new HttpError(401, 'unauthenticated');
@@ -31,7 +31,7 @@ export async function authenticate(req: Request, env: Env): Promise<{ userId: st
     headers: { Authorization: `Bearer ${token}`, apikey: env.SUPABASE_ANON_KEY },
   });
   if (!res.ok) throw new HttpError(401, 'invalid_token');
-  const user = (await res.json()) as { id?: string };
+  const user = (await res.json()) as { id?: string; email?: string };
   if (!user.id) throw new HttpError(401, 'invalid_token');
-  return { userId: user.id, token, db: userClient(env, token) };
+  return { userId: user.id, email: user.email ?? null, token, db: userClient(env, token) };
 }

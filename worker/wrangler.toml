@@ -43,6 +43,10 @@ SUPABASE_URL = "https://noyenmjdzfglniennbdo.supabase.co"
 # Google: project "mpc-cockpit" in MaLinda's Workspace (hello@malindaperryconsulting.com), Internal app, so only
 # malindaperryconsulting.com Google accounts can connect. Redirect URIs: tasks. and dashboard. .../api/email/oauth/callback.
 GOOGLE_CLIENT_ID = "666974968130-5po4bvh525kgg3l06pn696k4bn8sr3a7.apps.googleusercontent.com"
+# The cockpit's one-time sign-in to LinkHub (src/links.ts): which LinkHub username, and which Tasks accounts may use it.
+# The signing secret is LINKS_HANDOFF_KEY (wrangler secret put), the same value as HANDOFF_KEY on the linkhub Worker.
+LINKS_USERNAME = "malindaperry"
+LINKS_HANDOFF_EMAILS = "hello@malindaperryconsulting.com"
 # Secrets (never commit):  wrangler secret put SUPABASE_SERVICE_ROLE_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY (voice, optional) /
 #   EMAIL_TOKEN_KEY / GOOGLE_CLIENT_SECRET / MS_CLIENT_SECRET
 

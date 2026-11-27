@@ -14,6 +14,9 @@ export interface Env {
   API_URL?: string; // public origin of this Worker, for OAuth redirect URIs (default APP_URL)
   EMAIL_TOKEN_KEY?: string; // secret — base64 of 32 random bytes; encrypts mailbox tokens and passwords
   GOOGLE_CLIENT_ID?: string;
+  LINKS_HANDOFF_KEY?: string; // secret, shared with the LinkHub Worker (HANDOFF_KEY there) — signs the cockpit's one-time LinkHub pass
+  LINKS_USERNAME?: string; // the LinkHub username the cockpit signs in as
+  LINKS_HANDOFF_EMAILS?: string; // comma-separated: the Tasks accounts allowed to get that pass
   GOOGLE_CLIENT_SECRET?: string; // secret
   MS_CLIENT_ID?: string;
   MS_CLIENT_SECRET?: string; // secret

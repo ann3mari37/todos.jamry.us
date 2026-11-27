@@ -10,6 +10,7 @@ import { authorizationServerMetadata, authorize, consentProxy, handleMcp, MCP_CO
 import * as ops from './ops';
 import * as organize from './organize';
 import * as payhip from './payhip';
+import * as links from './links';
 import { isMpcHost } from './mpc';
 import { authenticate, HttpError } from './supabase';
 
@@ -49,7 +50,7 @@ function parse<T>(schema: { safeParse: (v: unknown) => { success: true; data: T 
   return r.data;
 }
 
-type Handler = (req: Request, env: Env, ctx: { db: Awaited<ReturnType<typeof authenticate>>['db']; userId: string }) => Promise<unknown>;
+type Handler = (req: Request, env: Env, ctx: { db: Awaited<ReturnType<typeof authenticate>>['db']; userId: string; email: string | null }) => Promise<unknown>;
 
 const AI_ROUTES: Record<string, Handler> = {
   '/api/ai/interpret-capture': async (req, env, c) => ops.interpretCapture({ env, ...c }, parse(ops.InterpretInput, await readJson(req))),
@@ -130,6 +131,8 @@ const DATA_ROUTES: Record<string, Handler> = {
   '/api/calendar/create': async (req, env, c) => calendar.createEvent(env, c.db, parse(calendar.CreateInput, await readJson(req))),
   '/api/payhip/stores': async (req, env, c) => payhip.addStore(env, c.db, c.userId, parse(payhip.StoreInput, await readJson(req))),
   '/api/payhip/stores/delete': async (req, _env, c) => payhip.deleteStore(c.db, parse(z.object({ store_id: z.string().uuid() }), await readJson(req)).store_id),
+  // A one-time pass that signs the cockpit's owner in to her LinkHub (links.malindaperryconsulting.com).
+  '/api/links/handoff': async (_req, env, c) => links.handoff(env, c.email),
   '/api/payhip/import': async (req, env, c) => payhip.importSales(env, c.db, parse(payhip.ImportInput, await readJson(req, 5_100_000))) /* a sales export can be large */,
 };
 
@@ -168,7 +171,7 @@ export default {
       // OAuth providers redirect the browser here (GET, no bearer token); the signed state identifies the user.
       if (pathname === '/api/email/oauth/callback' && req.method === 'GET') return finishOAuth(env, new URL(req.url));
       // The MaLinda Perry cockpit's routes answer only on malindaperryconsulting.com addresses.
-      if ((pathname.startsWith('/api/calendar/') || pathname.startsWith('/api/payhip/')) && !isMpcHost(new URL(req.url).host)) throw new HttpError(404, 'not_found');
+      if ((pathname.startsWith('/api/calendar/') || pathname.startsWith('/api/payhip/') || pathname.startsWith('/api/links/')) && !isMpcHost(new URL(req.url).host)) throw new HttpError(404, 'not_found');
       // Payhip calls this on every sale; the secret in the address identifies the store (no sign-in, no CORS).
       if (pathname.startsWith('/api/payhip/hook/') && req.method === 'POST') return payhip.handleHook(req, env, pathname.slice('/api/payhip/hook/'.length));
       const handler = AI_ROUTES[pathname] ?? DATA_ROUTES[pathname];
@@ -179,7 +182,7 @@ export default {
         if (pathname !== '/api/ai/transcribe' && !env.ANTHROPIC_API_KEY) throw new HttpError(503, 'ai_not_configured');
         await enforceLimits(env, auth.userId);
       }
-      return json(await handler(req, env, { db: auth.db, userId: auth.userId }), 200, headers);
+      return json(await handler(req, env, { db: auth.db, userId: auth.userId, email: auth.email }), 200, headers);
     } catch (e) {
       if (e instanceof HttpError) {
         // Error responses carry codes only — never task content.
