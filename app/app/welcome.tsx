@@ -31,8 +31,7 @@ export default function Welcome() {
           <Text accessibilityRole="header" style={{ fontFamily: fonts.serif, fontSize: 44, letterSpacing: 5, color: colors.heroText, textAlign: 'center' }}>MOMENTUM</Text>
           <Text style={{ fontFamily: fonts.medium, fontSize: 12, letterSpacing: 9, color: colors.heroMuted, textAlign: 'center', marginTop: 14 }}>SMALL STEPS</Text>
           <Text style={{ fontFamily: fonts.medium, fontSize: 12, letterSpacing: 9, color: colors.heroMuted, textAlign: 'center', marginTop: 8 }}>BIG CHANGE</Text>
-          <Button title="Get Started" onPress={() => router.push('/sign-in?mode=signup')} style={[{ marginTop: 34 }, isAviation && { backgroundColor: colors.heroText }]} textColor={isAviation ? colors.pinkDeep : undefined} />
-          <Button title="I already have an account" variant="ghost" onPress={() => router.push('/sign-in')} style={{ marginTop: 4 }} textColor={isAviation ? colors.heroText : undefined} />
+          <Button title="Sign in" onPress={() => router.push('/sign-in')} style={[{ marginTop: 34 }, isAviation && { backgroundColor: colors.heroText }]} textColor={isAviation ? colors.pinkDeep : undefined} />
         </View>
       </SafeAreaView>
     </View>

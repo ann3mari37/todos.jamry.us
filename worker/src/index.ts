@@ -11,6 +11,7 @@ import * as ops from './ops';
 import * as organize from './organize';
 import * as payhip from './payhip';
 import * as links from './links';
+import * as account from './account';
 import { isMpcHost } from './mpc';
 import { authenticate, HttpError } from './supabase';
 
@@ -133,6 +134,8 @@ const DATA_ROUTES: Record<string, Handler> = {
   '/api/payhip/stores/delete': async (req, _env, c) => payhip.deleteStore(c.db, parse(z.object({ store_id: z.string().uuid() }), await readJson(req)).store_id),
   // A one-time pass that signs the cockpit's owner in to her LinkHub (links.malindaperryconsulting.com).
   '/api/links/handoff': async (_req, env, c) => links.handoff(env, c.email, Date.now(), c.userId),
+  // Settings → Account: change the sign-in email right away (current password required, owner only).
+  '/api/account/email': async (req, env, c) => account.changeEmail(env, c, parse(account.EmailInput, await readJson(req))),
   '/api/payhip/import': async (req, env, c) => payhip.importSales(env, c.db, parse(payhip.ImportInput, await readJson(req, 5_100_000))) /* a sales export can be large */,
 };
 
@@ -171,7 +174,7 @@ export default {
       // OAuth providers redirect the browser here (GET, no bearer token); the signed state identifies the user.
       if (pathname === '/api/email/oauth/callback' && req.method === 'GET') return finishOAuth(env, new URL(req.url));
       // The MaLinda Perry cockpit's routes answer only on malindaperryconsulting.com addresses.
-      if ((pathname.startsWith('/api/calendar/') || pathname.startsWith('/api/payhip/') || pathname.startsWith('/api/links/')) && !isMpcHost(new URL(req.url).host)) throw new HttpError(404, 'not_found');
+      if ((pathname.startsWith('/api/calendar/') || pathname.startsWith('/api/payhip/') || pathname.startsWith('/api/links/') || pathname.startsWith('/api/account/')) && !isMpcHost(new URL(req.url).host)) throw new HttpError(404, 'not_found');
       // Payhip calls this on every sale; the secret in the address identifies the store (no sign-in, no CORS).
       if (pathname.startsWith('/api/payhip/hook/') && req.method === 'POST') return payhip.handleHook(req, env, pathname.slice('/api/payhip/hook/'.length));
       const handler = AI_ROUTES[pathname] ?? DATA_ROUTES[pathname];

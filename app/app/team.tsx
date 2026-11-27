@@ -224,7 +224,7 @@ function InviteSheet({ visible, roles, onClose, create }: { visible: boolean; ro
     <Sheet visible={visible} onClose={close} title="Invite someone">
       {made ? (
         <>
-          <Muted style={{ marginBottom: 6 }}>Send this link to {made.name || 'them'}. It works once, for 14 days. They sign in or create an account, then join.</Muted>
+          <Muted style={{ marginBottom: 6 }}>Send this link to {made.name || 'them'}. It works once, for 14 days. They sign in with their account, then join.</Muted>
           <CopyBox text={inviteLink(made.code)} label="Copy the invite link" />
           <Button title="Done" onPress={close} style={{ marginTop: 8 }} />
         </>

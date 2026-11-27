@@ -23,13 +23,16 @@ export async function signPass(secret: string, pass: HandoffPass): Promise<strin
 
 const list = (v: string | undefined) => String(v ?? '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
 
+/** True when this account ID is listed in LINKS_HANDOFF_USERS (the cockpit's owner). */
+export const isOwnerId = (env: Env, userId: string | null) => !!userId && list(env.LINKS_HANDOFF_USERS).includes(userId.toLowerCase());
+
 /**
  * POST /api/links/handoff — only for the accounts in LINKS_HANDOFF_USERS (by account ID) or LINKS_HANDOFF_EMAILS.
  * The ID is the one to rely on: it stays the same when the account's email changes, the email doesn't.
  */
 export async function handoff(env: Env, email: string | null, now = Date.now(), userId: string | null = null) {
   if (!env.LINKS_HANDOFF_KEY || !env.LINKS_USERNAME) throw new HttpError(503, 'links_not_configured');
-  const byId = !!userId && list(env.LINKS_HANDOFF_USERS).includes(userId.toLowerCase());
+  const byId = isOwnerId(env, userId);
   const byEmail = !!email && list(env.LINKS_HANDOFF_EMAILS).includes(email.toLowerCase());
   if (!byId && !byEmail) throw new HttpError(403, 'links_not_allowed');
   const pass: HandoffPass = {

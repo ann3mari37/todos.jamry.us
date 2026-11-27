@@ -5,7 +5,7 @@ import { Banner, Body, Button, Card, Field, H1, IconCircle, Muted, Screen } from
 import { useStore, type InviteInfo } from '../src/lib/store';
 import { colors, fonts } from '../src/theme';
 
-// Where an invite link lands: sign in (or create an account) first, see which team and role it's for, pick the name
+// Where an invite link lands: sign in first, see which team and role it's for, pick the name
 // teammates will see, and join.
 
 export default function Join() {
@@ -20,7 +20,7 @@ export default function Join() {
     if (!store.authReady) return;
     if (!code) { setInfo(null); return; }
     if (!store.session) {
-      router.replace({ pathname: '/sign-in', params: { mode: 'signup', next: `/join?code=${encodeURIComponent(code)}` } });
+      router.replace({ pathname: '/sign-in', params: { next: `/join?code=${encodeURIComponent(code)}` } });
       return;
     }
     store.inviteInfo(code).then((i) => { setInfo(i); setName((n) => n || i?.name || store.profile?.display_name || ''); }).catch(() => setInfo(null));
