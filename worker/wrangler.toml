@@ -48,7 +48,7 @@ GOOGLE_CLIENT_ID = "666974968130-5po4bvh525kgg3l06pn696k4bn8sr3a7.apps.googleuse
 LINKS_USERNAME = "malindaperry"
 LINKS_HANDOFF_EMAILS = "hello@malindaperryconsulting.com"
 # Her account ID (Cockpit → Settings → Account). Keeps Links working after she changes her sign-in email.
-LINKS_HANDOFF_USERS = ""
+LINKS_HANDOFF_USERS = "b9d2ad55-6656-4faa-9075-445f2132c534"
 # Secrets (never commit):  wrangler secret put SUPABASE_SERVICE_ROLE_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY (voice, optional) /
 #   EMAIL_TOKEN_KEY / GOOGLE_CLIENT_SECRET / MS_CLIENT_SECRET
 
